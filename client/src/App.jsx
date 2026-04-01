@@ -1,43 +1,23 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useAuth0 } from "@auth0/auth0-react";
+import Navbar from "./components/Navbar";
+import Dashboard from "./pages/Dashboard";
 
 function App() {
-  const {
-    loginWithRedirect,
-    logout,
-    user,
-    isAuthenticated,
-    isLoading,
-  } = useAuth0();
+  const { isLoading } = useAuth0();
 
   if (isLoading) {
     return <div>Loading...</div>;
   }
 
   return (
-    <div style={{ padding: "40px", fontFamily: "Arial" }}>
-      <h1>Task Management Platform</h1>
+    <BrowserRouter>
+      <Navbar />
 
-      {!isAuthenticated ? (
-        <button onClick={() => loginWithRedirect()}>
-          Log In
-        </button>
-      ) : (
-        <>
-          <p>Welcome {user?.name}</p>
-          <button
-            onClick={() =>
-              logout({
-                logoutParams: {
-                  returnTo: window.location.origin,
-                },
-              })
-            }
-          >
-            Log Out
-          </button>
-        </>
-      )}
-    </div>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

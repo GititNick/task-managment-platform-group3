@@ -1,13 +1,14 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useAuth0 } from "@auth0/auth0-react";
 import { useEffect, useState } from "react";
+import Navbar from "./components/Navbar";
+import Dashboard from "./pages/Dashboard";
 
 function App() {
   const {
-    loginWithRedirect,
-    logout,
-    user,
-    isAuthenticated,
     isLoading,
+    isAuthenticated,
+    user,
   } = useAuth0();
 
   const [syncStatus, setSyncStatus] = useState("");
@@ -62,31 +63,12 @@ function App() {
   }
 
   return (
-    <div style={{ padding: "40px", fontFamily: "Arial" }}>
-      <h1>Task Management Platform</h1>
-
-      {!isAuthenticated ? (
-        <button onClick={() => loginWithRedirect()}>
-          Log In
-        </button>
-      ) : (
-        <>
-          <p>Welcome {user?.name}</p>
-          <p style={{ fontSize: "12px", color: "#666" }}>{syncStatus}</p>
-          <button
-            onClick={() =>
-              logout({
-                logoutParams: {
-                  returnTo: window.location.origin,
-                },
-              })
-            }
-          >
-            Log Out
-          </button>
-        </>
-      )}
-    </div>
+    <BrowserRouter>
+      <Navbar />
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

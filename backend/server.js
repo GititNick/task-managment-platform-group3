@@ -284,6 +284,28 @@ app.get('/api/users/:id', async (req, res) => {
   }
 });
 
+// Get user by auth0_id
+app.get('/api/users/auth0/:auth0_id', async (req, res) => {
+  try {
+    const { auth0_id } = req.params;
+    const result = await client.query('SELECT id, auth0_id, name, email, created_at FROM users WHERE auth0_id = $1', [auth0_id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      status: 'User retrieved',
+      user: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'Error retrieving user',
+      error: error.message
+    });
+  }
+});
+
 // Get all users
 app.get('/api/users', async (req, res) => {
   try {

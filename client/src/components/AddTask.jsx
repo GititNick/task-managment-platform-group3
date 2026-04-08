@@ -1,4 +1,8 @@
-export default function AddTask({ newTask, setNewTask, handleAddTask }) {
+export default function AddTask({
+  newTask,
+  setNewTask,
+  handleAddTask
+}) {
   return (
     <div style={{ margin: "20px 0", display: "flex", gap: "10px" }}>
       <input
@@ -7,9 +11,9 @@ export default function AddTask({ newTask, setNewTask, handleAddTask }) {
         value={newTask}
         onChange={(e) => setNewTask(e.target.value)}
         style={{
-          padding: "8px",
-          borderRadius: "5px",
-          border: "1px solid #ccc",
+          padding: "10px",
+          borderRadius: "6px",
+          border: "1px solid var(--border)",
           flex: 1
         }}
       />
@@ -17,12 +21,11 @@ export default function AddTask({ newTask, setNewTask, handleAddTask }) {
       <button
         onClick={handleAddTask}
         style={{
-          backgroundColor: "#22c55e",
+          backgroundColor: "var(--primary)",
           color: "white",
           border: "none",
-          padding: "8px 12px",
-          borderRadius: "5px",
-          cursor: "pointer"
+          padding: "10px 14px",
+          borderRadius: "6px"
         }}
       >
         Add Task

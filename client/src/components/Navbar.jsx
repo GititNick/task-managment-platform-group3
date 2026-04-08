@@ -1,49 +1,73 @@
 import { useAuth0 } from "@auth0/auth0-react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
 
 export default function Navbar() {
   const { loginWithRedirect, logout, isAuthenticated, user } = useAuth0();
+  const [theme, setTheme] = useState("light");
+
+  // Load saved theme
+  useEffect(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved) setTheme(saved);
+  }, []);
+
+  // Apply theme
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => (prev === "light" ? "dark" : "light"));
+  };
 
   return (
-    <nav style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: "10px 20px",
-      backgroundColor: "#f5f5f5",
-      borderBottom: "1px solid #ddd"
-    }}>
-      {/* LEFT SIDE */}
-      <div style={{ display: "flex", gap: "15px" }}>
-        <Link to="/" style={{ textDecoration: "none", fontWeight: "bold" }}>
-          Dashboard
-        </Link>
-      </div>
+    <div
+      style={{
+        width: "100%",
+        borderBottom: "1px solid var(--border)",
+        backgroundColor: "var(--card)"
+      }}
+    >
+      <div
+        style={{
+          maxWidth: "800px",
+          margin: "0 auto",
+          padding: "12px 20px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}
+      >
+        <span style={{ fontWeight: "bold" }}>Dashboard</span>
 
-      {/* RIGHT SIDE */}
-      <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-        {isAuthenticated && (
-          <span style={{ fontSize: "14px" }}>
-            {user.email}
-          </span>
-        )}
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <button onClick={toggleTheme}>
+            {theme === "light" ? "Dark Mode" : "Light Mode"}
+          </button>
 
-        {!isAuthenticated ? (
-          <button onClick={() => loginWithRedirect()}>
-            Login
-          </button>
-        ) : (
-          <button
-            onClick={() =>
-              logout({
-                logoutParams: { returnTo: window.location.origin }
-              })
-            }
-          >
-            Logout
-          </button>
-        )}
+          {!isAuthenticated ? (
+            <button onClick={() => loginWithRedirect()}>
+              Login
+            </button>
+          ) : (
+            <>
+              <span>{user?.email}</span>
+              <button
+                onClick={() =>
+                  logout({
+                    logoutParams: {
+                      returnTo: window.location.origin
+                    }
+                  })
+                }
+              >
+                Logout
+              </button>
+            </>
+          )}
+        </div>
       </div>
-    </nav>
+    </div>
   );
 }

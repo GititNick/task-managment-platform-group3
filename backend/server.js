@@ -5,12 +5,27 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { pipeline } from '@xenova/transformers';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
+const HUGGINGFACE_MODEL = process.env.HUGGINGFACE_MODEL || 'distilgpt2';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Initialize AI model
+let generator;
+(async () => {
+  try {
+    console.log('Loading AI model...');
+    generator = await pipeline('text-generation', 'Xenova/distilgpt2');
+    console.log('AI model loaded successfully');
+  } catch (error) {
+    console.error('Failed to load AI model:', error);
+  }
+})();
 
 // Middleware - CORS must be first
 app.use((req, res, next) => {
@@ -444,7 +459,7 @@ app.delete('/api/tasks/:id', async (req, res) => {
 
 // ===== AI ENDPOINTS =====
 
-// Generate task suggestions using Hugging Face
+// Generate task suggestions using local AI model
 app.post('/api/ai/suggest-tasks', async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -453,32 +468,19 @@ app.post('/api/ai/suggest-tasks', async (req, res) => {
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
-    // Use Hugging Face Inference API with distilgpt2 (free model)
-    const response = await fetch('https://api-inference.huggingface.co/models/distilbert/distilgpt-2', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        inputs: `Suggest tasks based on: ${prompt}`,
-        parameters: {
-          max_length: 100,
-          num_return_sequences: 3,
-          temperature: 0.7,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      return res.status(500).json({ error: 'AI service error', details: errorData });
+    if (!generator) {
+      return res.status(500).json({ error: 'AI model not loaded' });
     }
 
-    const data = await response.json();
+    const output = await generator(`Suggest tasks based on: ${prompt}`, {
+      max_new_tokens: 100,
+      num_return_sequences: 3,
+      temperature: 0.7,
+      do_sample: true,
+    });
 
     // Parse the generated text into task suggestions
-    const suggestions = data.map(item => item.generated_text.replace(`Suggest tasks based on: ${prompt}`, '').trim().split('\n').filter(line => line.trim()));
+    const suggestions = output.map(item => item.generated_text.replace(`Suggest tasks based on: ${prompt}`, '').trim().split('\n').filter(line => line.trim()));
 
     res.json({
       status: 'Suggestions generated',

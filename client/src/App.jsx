@@ -3,6 +3,7 @@ import { useAuth0 } from "@auth0/auth0-react";
 import { useEffect, useState } from "react";
 import Navbar from "./components/Navbar";
 import Dashboard from "./pages/Dashboard";
+import { apiUrl } from "./api";
 
 function App() {
   const {
@@ -32,7 +33,7 @@ function App() {
       };
       console.log("Sending payload:", payload);
 
-      const response = await fetch("/api/auth/sync-user", {
+      const response = await fetch(apiUrl("/api/auth/sync-user"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

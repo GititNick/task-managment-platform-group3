@@ -442,6 +442,56 @@ app.delete('/api/tasks/:id', async (req, res) => {
   }
 });
 
+// ===== AI ENDPOINTS =====
+
+// Generate task suggestions using Hugging Face
+app.post('/api/ai/suggest-tasks', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    // Use Hugging Face Inference API with distilgpt2 (free model)
+    const response = await fetch('https://api-inference.huggingface.co/models/distilbert/distilgpt-2', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        inputs: `Suggest tasks based on: ${prompt}`,
+        parameters: {
+          max_length: 100,
+          num_return_sequences: 3,
+          temperature: 0.7,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return res.status(500).json({ error: 'AI service error', details: errorData });
+    }
+
+    const data = await response.json();
+
+    // Parse the generated text into task suggestions
+    const suggestions = data.map(item => item.generated_text.replace(`Suggest tasks based on: ${prompt}`, '').trim().split('\n').filter(line => line.trim()));
+
+    res.json({
+      status: 'Suggestions generated',
+      suggestions: suggestions.flat().slice(0, 5), // Limit to 5 suggestions
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'Error generating suggestions',
+      error: error.message
+    });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Backend ready on http://localhost:${PORT}`);

@@ -2,6 +2,7 @@ import { useAuth0 } from "@auth0/auth0-react";
 import { useEffect, useState } from "react";
 import TaskList from "../components/TaskList";
 import AddTask from "../components/AddTask";
+import { apiUrl } from "../api";
 
 export default function Dashboard() {
   const { isAuthenticated, user, isLoading } = useAuth0();
@@ -27,7 +28,7 @@ export default function Dashboard() {
 
   const fetchUserId = async () => {
     try {
-      const response = await fetch(`/api/users/auth0/${user.sub}`);
+      const response = await fetch(apiUrl(`/api/users/auth0/${user.sub}`));
       if (response.ok) {
         const data = await response.json();
         setUserId(data.user.id);
@@ -44,7 +45,7 @@ export default function Dashboard() {
   const fetchUserTasks = async () => {
     try {
       setTasksLoading(true);
-      const response = await fetch(`/api/tasks/user/${userId}`);
+      const response = await fetch(apiUrl(`/api/tasks/user/${userId}`));
       if (response.ok) {
         const data = await response.json();
         // Map database tasks to frontend format
@@ -75,7 +76,7 @@ export default function Dashboard() {
     }
 
     try {
-      const response = await fetch("/api/tasks", {
+      const response = await fetch(apiUrl("/api/tasks"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -115,7 +116,7 @@ export default function Dashboard() {
   // ❌ Delete task from database
   const handleDeleteTask = async (id) => {
     try {
-      const response = await fetch(`/api/tasks/${id}`, {
+      const response = await fetch(apiUrl(`/api/tasks/${id}`), {
         method: "DELETE"
       });
 
@@ -134,7 +135,7 @@ export default function Dashboard() {
   // 🔄 Update task status in database
   const handleStatusChange = async (id, newStatus) => {
     try {
-      const response = await fetch(`/api/tasks/${id}`, {
+      const response = await fetch(apiUrl(`/api/tasks/${id}`), {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

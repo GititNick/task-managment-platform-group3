@@ -25,6 +25,8 @@ Render setup:
    - `AUTH0_DOMAIN`
    - `AUTH0_M2M_CLIENT_ID`
    - `AUTH0_M2M_CLIENT_SECRET`
+   - `HUGGINGFACE_API_KEY`
+   - `HUGGINGFACE_MODEL` (optional, default: `distilgpt2`)
 6. Optionally, use the `render.yaml` file in the repo root to define the service configuration.
 
 ### Frontend deployment
@@ -41,6 +43,8 @@ This makes the deployed React app call the backend service instead of relying on
 - Run client: `cd client && npm install && npm run dev`
 
 The frontend development server proxies `/api` requests to `http://localhost:3001`.
+
+If you enable the AI feature, make sure the backend has a valid `HUGGINGFACE_API_KEY` and a supported model in `HUGGINGFACE_MODEL`. The default `distilgpt2` model may not work for every HF account or plan, so swap it to another public text-generation model if you see AI service errors.
 
 ### Backend environment example
 

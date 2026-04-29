@@ -5,12 +5,43 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { pipeline } from '@xenova/transformers';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
+const HUGGINGFACE_MODEL = process.env.HUGGINGFACE_MODEL || 'distilgpt2';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Initialize AI model
+let generator;
+(async () => {
+  try {
+    console.log('Loading AI model...');
+    generator = await pipeline('text2text-generation', 'Xenova/flan-t5-small');
+    console.log('AI model loaded successfully');
+  } catch (error) {
+    console.error('Failed to load Flan-T5 model:', error);
+    // Fallback to GPT-2
+    try {
+      console.log('Trying GPT-2 fallback...');
+      generator = await pipeline('text-generation', 'Xenova/gpt2');
+      console.log('GPT-2 model loaded successfully');
+    } catch (fallbackError) {
+      console.error('GPT-2 also failed:', fallbackError);
+      // Final fallback
+      try {
+        console.log('Trying distilgpt2 fallback...');
+        generator = await pipeline('text-generation', 'Xenova/distilgpt2');
+        console.log('DistilGPT-2 model loaded successfully');
+      } catch (finalError) {
+        console.error('All models failed:', finalError);
+      }
+    }
+  }
+})();
 
 // Middleware - CORS must be first
 app.use((req, res, next) => {
@@ -437,6 +468,228 @@ app.delete('/api/tasks/:id', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       status: 'Error deleting task',
+      error: error.message
+    });
+  }
+});
+
+// ===== AI ENDPOINTS =====
+
+// Intelligent task suggestion system - generates contextual task recommendations
+function generateSmartSuggestions(tasks) {
+  if (tasks.length === 0) {
+    return ["Add your first task"];
+  }
+
+  const suggestions = new Set();
+  const existingTitles = tasks.map(t => t.title.toLowerCase());
+  const allTaskText = tasks.map(t => `${t.title} ${t.description || ''}`).join(' ').toLowerCase();
+
+  // Analyze existing tasks for patterns
+  tasks.forEach(task => {
+    const title = task.title.toLowerCase();
+    const description = (task.description || '').toLowerCase();
+    const fullText = `${title} ${description}`;
+
+    // Project/Proposal related
+    if (fullText.includes('project') || fullText.includes('proposal')) {
+      if (!allTaskText.includes('requirements') && !allTaskText.includes('scope')) {
+        suggestions.add("Gather and document project requirements");
+      }
+      if (!allTaskText.includes('timeline') && !allTaskText.includes('schedule')) {
+        suggestions.add("Create project timeline and milestones");
+      }
+      if (!allTaskText.includes('stakeholder') && !allTaskText.includes('kickoff')) {
+        suggestions.add("Schedule stakeholder kickoff meeting");
+      }
+      if (!allTaskText.includes('resource') && !allTaskText.includes('team')) {
+        suggestions.add("Allocate team resources and assign roles");
+      }
+    }
+
+    // Code/Review related
+    if (fullText.includes('code') || fullText.includes('review') || fullText.includes('pull request')) {
+      if (!allTaskText.includes('test') && !allTaskText.includes('qa')) {
+        suggestions.add("Write and run unit tests");
+      }
+      if (!allTaskText.includes('merge') && !allTaskText.includes('deploy')) {
+        suggestions.add("Merge code and deploy to staging");
+      }
+      if (!allTaskText.includes('documentation') && !allTaskText.includes('comment')) {
+        suggestions.add("Add code documentation and comments");
+      }
+      if (!allTaskText.includes('conflict') && !allTaskText.includes('dependency')) {
+        suggestions.add("Resolve merge conflicts and dependencies");
+      }
+    }
+
+    // Feature/Implementation related
+    if (fullText.includes('feature') || fullText.includes('implement') || fullText.includes('build')) {
+      if (!allTaskText.includes('design') && !allTaskText.includes('ui')) {
+        suggestions.add("Design UI/UX mockups");
+      }
+      if (!allTaskText.includes('api') && !allTaskText.includes('endpoint')) {
+        suggestions.add("Build API endpoints");
+      }
+      if (!allTaskText.includes('database') && !allTaskText.includes('schema')) {
+        suggestions.add("Set up database schema");
+      }
+      if (!allTaskText.includes('integration') && !allTaskText.includes('connect')) {
+        suggestions.add("Integrate with third-party services");
+      }
+    }
+
+    // Bug/Fix related
+    if (fullText.includes('bug') || fullText.includes('fix') || fullText.includes('issue')) {
+      if (!allTaskText.includes('root cause') && !allTaskText.includes('analysis')) {
+        suggestions.add("Perform root cause analysis");
+      }
+      if (!allTaskText.includes('regression test')) {
+        suggestions.add("Run regression tests");
+      }
+      if (!allTaskText.includes('deploy') && !allTaskText.includes('release')) {
+        suggestions.add("Deploy bug fix to production");
+      }
+      if (!allTaskText.includes('monitor')) {
+        suggestions.add("Monitor system for similar issues");
+      }
+    }
+
+    // Testing related
+    if (fullText.includes('test') || fullText.includes('qa')) {
+      if (!allTaskText.includes('test plan')) {
+        suggestions.add("Create test plan and test cases");
+      }
+      if (!allTaskText.includes('automation')) {
+        suggestions.add("Automate test cases");
+      }
+      if (!allTaskText.includes('report') && !allTaskText.includes('results')) {
+        suggestions.add("Generate test report and document results");
+      }
+    }
+
+    // Documentation related
+    if (fullText.includes('documentation') || fullText.includes('document') || fullText.includes('wiki')) {
+      if (!allTaskText.includes('api docs') && !allTaskText.includes('api documentation')) {
+        suggestions.add("Update API documentation");
+      }
+      if (!allTaskText.includes('user guide') && !allTaskText.includes('manual')) {
+        suggestions.add("Create user guide and documentation");
+      }
+      if (!allTaskText.includes('example') && !allTaskText.includes('tutorial')) {
+        suggestions.add("Add code examples and tutorials");
+      }
+    }
+
+    // Default workflow tasks if no specific pattern matched
+    if (task.status === 'pending' && !allTaskText.includes('review')) {
+      suggestions.add("Review requirements and acceptance criteria");
+    }
+    if (task.status === 'in-progress' && !allTaskText.includes('checkpoint')) {
+      suggestions.add("Complete checkpoint and mark progress");
+    }
+    if (task.status === 'completed' && !allTaskText.includes('verify')) {
+      suggestions.add("Verify completion and gather feedback");
+    }
+  });
+
+  // Convert to array, filter out empty or very similar ones, and return top 5
+  const finalSuggestions = Array.from(suggestions)
+    .filter(s => s.length > 5 && s.length < 100)
+    .slice(0, 5);
+
+  return finalSuggestions.length > 0 ? finalSuggestions : ["Add next step task"];
+}
+
+// Generate task suggestions using local AI model
+app.post('/api/ai/suggest-tasks', async (req, res) => {
+  try {
+    const { mode, prompt, userId, tasks } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    if (!generator) {
+      return res.status(500).json({ error: 'AI model not loaded' });
+    }
+
+    let aiPrompt = "";
+    let userTasks = [];
+
+    if (mode === "analyze") {
+      // Fetch user's current tasks from database
+      const tasksResult = await client.query(
+        'SELECT title, description, status FROM tasks WHERE user_id = $1 ORDER BY created_at DESC',
+        [userId]
+      );
+      userTasks = tasksResult.rows;
+
+      // Use rule-based suggestion system
+      const suggestions = generateSmartSuggestions(userTasks);
+
+      res.json({
+        status: 'Suggestions generated',
+        suggestions: suggestions,
+        mode: mode
+      });
+      return;
+    } else {
+      // Generate from prompt - user provided description
+      aiPrompt = `Suggest 3-5 actionable tasks: ${prompt}`;
+    }
+
+    let output;
+    if (generator.task === 'text2text-generation') {
+      // T5 model - text2text
+      output = await generator(aiPrompt, {
+        max_new_tokens: 100,
+        temperature: 0.7,
+        do_sample: true,
+      });
+    } else {
+      // GPT-style model - generative
+      output = await generator(aiPrompt, {
+        max_new_tokens: 100,
+        temperature: 0.8,
+        do_sample: true,
+      });
+    }
+
+    console.log('AI Prompt:', aiPrompt);
+    console.log('AI Output:', output[0]?.generated_text || output[0]?.text || 'No output');
+
+    // Parse the generated text into task suggestions
+    let generatedText;
+    if (generator.task === 'text2text-generation') {
+      generatedText = output[0]?.generated_text || '';
+    } else {
+      generatedText = (output[0]?.generated_text || '').replace(aiPrompt, '').trim();
+    }
+
+    console.log('Processed output:', generatedText);
+
+    // Simple parsing - split by newlines and clean up
+    const suggestions = generatedText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 3 && line.length < 80) // Reasonable length
+      .filter(line => !line.includes('Current tasks') && !line.includes('Suggest'))
+      .map(line => line.replace(/^[-•*\d]+\.?\s*/, '')) // Remove bullets/numbering
+      .filter(line => line.length > 3)
+      .slice(0, 5); // Limit to 5
+
+    console.log('Final suggestions:', suggestions);
+
+    res.json({
+      status: 'Suggestions generated',
+      suggestions: suggestions,
+      mode: mode
+    });
+  } catch (error) {
+    console.error('AI generation error:', error);
+    res.status(500).json({
+      status: 'Error generating suggestions',
       error: error.message
     });
   }

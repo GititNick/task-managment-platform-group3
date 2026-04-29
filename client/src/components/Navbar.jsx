@@ -1,25 +1,7 @@
 import { useAuth0 } from "@auth0/auth0-react";
-import { useState, useEffect } from "react";
 
 export default function Navbar() {
   const { loginWithRedirect, logout, isAuthenticated, user } = useAuth0();
-  const [theme, setTheme] = useState("light");
-
-  // Load saved theme
-  useEffect(() => {
-    const saved = localStorage.getItem("theme");
-    if (saved) setTheme(saved);
-  }, []);
-
-  // Apply theme
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("theme", theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme(prev => (prev === "light" ? "dark" : "light"));
-  };
 
   return (
     <div
@@ -42,10 +24,6 @@ export default function Navbar() {
         <span style={{ fontWeight: "bold" }}>Dashboard</span>
 
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-          <button onClick={toggleTheme}>
-            {theme === "light" ? "Dark Mode" : "Light Mode"}
-          </button>
-
           {!isAuthenticated ? (
             <button onClick={() => loginWithRedirect()}>
               Login

@@ -2,6 +2,7 @@ import { useAuth0 } from "@auth0/auth0-react";
 import { useEffect, useState } from "react";
 import TaskList from "../components/TaskList";
 import AddTask from "../components/AddTask";
+import AISuggestions from "../components/AISuggestions";
 import { apiUrl } from "../api";
 
 export default function Dashboard() {
@@ -170,6 +171,50 @@ export default function Dashboard() {
     );
   };
 
+  // Add AI suggestion as a new task
+  const handleAddSuggestion = async (suggestion) => {
+    if (!userId) {
+      setError("User ID not available. Please refresh the page.");
+      return;
+    }
+
+    try {
+      const response = await fetch(apiUrl("/api/tasks"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          title: suggestion,
+          description: "",
+          status: "pending"
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const task = data.task;
+        
+        // Add to local state
+        setTasks([...tasks, {
+          id: task.id,
+          title: task.title,
+          status: task.status || "Todo",
+          assignedTo: "You",
+          description: task.description
+        }]);
+        setError("");
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || "Error creating task");
+      }
+    } catch (error) {
+      console.error("Error adding task:", error);
+      setError("Error creating task");
+    }
+  };
+
   if (isLoading) return <div>Loading...</div>;
 
   return (
@@ -201,6 +246,8 @@ export default function Dashboard() {
                 setNewTask={setNewTask}
                 handleAddTask={handleAddTask}
               />
+
+              <AISuggestions onAddSuggestion={handleAddSuggestion} userId={userId} tasks={tasks} />
 
               <TaskList
                 tasks={tasks}

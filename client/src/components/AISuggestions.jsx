@@ -76,7 +76,7 @@ export default function AISuggestions({ onAddSuggestion, userId, tasks = [] }) {
     <div style={{ margin: "20px 0", padding: "20px", border: "1px solid #ddd", borderRadius: "8px" }}>
       <h3>AI Task Assistant</h3>
       <p style={{ marginBottom: "15px", color: "#666" }}>
-        Analyze your current tasks and get AI-powered suggestions for improvements and new tasks.
+        Analyze your current tasks and get AI-powered suggestions for improvements and related tasks across any domain.
       </p>
 
       <button

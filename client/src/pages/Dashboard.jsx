@@ -11,14 +11,19 @@ export default function Dashboard() {
   const [tasksLoading, setTasksLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Fetch user ID from database when user authenticates
+  // UI ADDITION: background color picker
+  const [bgColor, setBgColor] = useState("#0f172a");
+
+  // search + filter
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterType, setFilterType] = useState("none");
+
   useEffect(() => {
     if (isAuthenticated && user?.sub) {
       fetchUserId();
     }
   }, [isAuthenticated, user?.sub]);
 
-  // Fetch tasks when userId is available
   useEffect(() => {
     if (userId) {
       fetchUserTasks();
@@ -32,11 +37,9 @@ export default function Dashboard() {
         const data = await response.json();
         setUserId(data.user.id);
       } else {
-        console.error("User not found in database");
         setError("User not found. Please refresh the page.");
       }
     } catch (error) {
-      console.error("Error fetching user:", error);
       setError("Error loading user data");
     }
   };
@@ -47,7 +50,6 @@ export default function Dashboard() {
       const response = await fetch(`/api/tasks/user/${userId}`);
       if (response.ok) {
         const data = await response.json();
-        // Map database tasks to frontend format
         const formattedTasks = data.tasks.map(task => ({
           id: task.id,
           title: task.title,
@@ -59,14 +61,12 @@ export default function Dashboard() {
         setTasks(formattedTasks);
       }
     } catch (error) {
-      console.error("Error fetching tasks:", error);
       setError("Error loading tasks");
     } finally {
       setTasksLoading(false);
     }
   };
 
-  // ➕ Add task to database
   const handleAddTask = async () => {
     if (!newTask.trim()) return;
     if (!userId) {
@@ -77,9 +77,7 @@ export default function Dashboard() {
     try {
       const response = await fetch("/api/tasks", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: userId,
           title: newTask,
@@ -91,8 +89,7 @@ export default function Dashboard() {
       if (response.ok) {
         const data = await response.json();
         const task = data.task;
-        
-        // Add to local state
+
         setTasks([...tasks, {
           id: task.id,
           title: task.title,
@@ -100,6 +97,7 @@ export default function Dashboard() {
           assignedTo: "You",
           description: task.description
         }]);
+
         setNewTask("");
         setError("");
       } else {
@@ -107,12 +105,10 @@ export default function Dashboard() {
         setError(errorData.error || "Error creating task");
       }
     } catch (error) {
-      console.error("Error adding task:", error);
       setError("Error creating task");
     }
   };
 
-  // ❌ Delete task from database
   const handleDeleteTask = async (id) => {
     try {
       const response = await fetch(`/api/tasks/${id}`, {
@@ -121,96 +117,143 @@ export default function Dashboard() {
 
       if (response.ok) {
         setTasks(tasks.filter(task => task.id !== id));
-        setError("");
       } else {
         setError("Error deleting task");
       }
     } catch (error) {
-      console.error("Error deleting task:", error);
       setError("Error deleting task");
     }
   };
 
-  // 🔄 Update task status in database
   const handleStatusChange = async (id, newStatus) => {
     try {
       const response = await fetch(`/api/tasks/${id}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          status: newStatus
-        })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus })
       });
 
       if (response.ok) {
-        setTasks(prevTasks =>
-          prevTasks.map(task =>
+        setTasks(prev =>
+          prev.map(task =>
             task.id === id ? { ...task, status: newStatus } : task
           )
         );
-        setError("");
       } else {
         setError("Error updating task");
       }
     } catch (error) {
-      console.error("Error updating task:", error);
       setError("Error updating task");
     }
   };
 
-  // 👤 Assign user (for now, just update local state as backend doesn't have assignment field)
   const handleAssignChange = (id, userName) => {
-    setTasks(prevTasks =>
-      prevTasks.map(task =>
+    setTasks(prev =>
+      prev.map(task =>
         task.id === id ? { ...task, assignedTo: userName } : task
       )
     );
   };
 
+  // FILTER LOGIC
+  let filteredTasks = tasks.filter(task =>
+    task.title.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  if (filterType === "alphabetical") {
+    filteredTasks.sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  if (filterType === "status") {
+    const statusOrder = { pending: 1, Todo: 2, completed: 3 };
+    filteredTasks.sort(
+      (a, b) =>
+        (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99)
+    );
+  }
+
   if (isLoading) return <div>Loading...</div>;
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h1>Task Management Dashboard</h1>
+    <div
+      style={{
+        minHeight: "100vh",
+        padding: "30px",
+        background: bgColor,
+        color: "white",
+        fontFamily: "Arial, sans-serif"
+      }}
+    >
+      <div style={{ maxWidth: "900px", margin: "0 auto" }}>
+        <h1>Task Management Dashboard</h1>
 
-      <hr />
-
-      {error && (
-        <div style={{ color: "red", marginBottom: "10px", padding: "10px", backgroundColor: "#ffe0e0", borderRadius: "5px" }}>
-          {error}
+        {/* 🎨 COLOR PICKER UI */}
+        <div style={{ marginBottom: "15px" }}>
+          <label style={{ marginRight: "10px" }}>
+            Pick Background Color:
+          </label>
+          <input
+            type="color"
+            value={bgColor}
+            onChange={(e) => setBgColor(e.target.value)}
+          />
         </div>
-      )}
 
-      {!isAuthenticated && (
-        <p>Please log in using the button in the top right.</p>
-      )}
+        <hr />
 
-      {isAuthenticated && (
-        <>
-          <h2>Welcome {user?.email}</h2>
+        {error && (
+          <div style={{ color: "red", marginBottom: "10px" }}>
+            {error}
+          </div>
+        )}
 
-          {tasksLoading ? (
-            <p>Loading tasks...</p>
-          ) : (
-            <>
-              <AddTask
-                newTask={newTask}
-                setNewTask={setNewTask}
-                handleAddTask={handleAddTask}
-              />
+        {!isAuthenticated && <p>Please log in using the button.</p>}
 
-              <TaskList
-                tasks={tasks}
-                onDelete={handleDeleteTask}
-                onStatusChange={handleStatusChange}
-                onAssignChange={handleAssignChange}
-              />
-            </>
-          )}
-        </>
-      )}
+        {isAuthenticated && (
+          <>
+            <h2>Welcome {user?.email}</h2>
+
+            {tasksLoading ? (
+              <p>Loading tasks...</p>
+            ) : (
+              <>
+                <AddTask
+                  newTask={newTask}
+                  setNewTask={setNewTask}
+                  handleAddTask={handleAddTask}
+                />
+
+                {/* SEARCH + FILTER UI */}
+                <div style={{ margin: "10px 0" }}>
+                  <input
+                    placeholder="Search tasks..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={{ marginRight: "10px", padding: "5px" }}
+                  />
+
+                  <select
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value)}
+                    style={{ padding: "5px" }}
+                  >
+                    <option value="none">No Filter</option>
+                    <option value="alphabetical">A-Z</option>
+                    <option value="status">Status</option>
+                  </select>
+                </div>
+
+                <TaskList
+                  tasks={filteredTasks}
+                  onDelete={handleDeleteTask}
+                  onStatusChange={handleStatusChange}
+                  onAssignChange={handleAssignChange}
+                />
+              </>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

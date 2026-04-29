@@ -247,7 +247,7 @@ export default function Dashboard() {
                 handleAddTask={handleAddTask}
               />
 
-              <AISuggestions onAddSuggestion={handleAddSuggestion} />
+              <AISuggestions onAddSuggestion={handleAddSuggestion} userId={userId} tasks={tasks} />
 
               <TaskList
                 tasks={tasks}

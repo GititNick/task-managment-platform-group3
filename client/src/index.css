@@ -7,15 +7,6 @@
   --danger: #ef4444;
 }
 
-[data-theme="dark"] {
-  --bg: #0f172a;
-  --card: #1e293b;
-  --text: #e2e8f0;
-  --border: #334155;
-  --primary: #3b82f6;
-  --danger: #f87171;
-}
-
 body {
   margin: 0;
   background-color: var(--bg);

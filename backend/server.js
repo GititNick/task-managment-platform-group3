@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const HF_TOKEN = process.env.HF_TOKEN;
+const HF_TOKEN = process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY;
 const HUGGINGFACE_MODEL =
   process.env.HUGGINGFACE_MODEL || 'Qwen/Qwen2.5-7B-Instruct';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

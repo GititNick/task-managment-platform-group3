@@ -7,11 +7,11 @@ export default function TaskCard({
   return (
     <div
       style={{
-        border: "1px solid var(--border)",
+        border: "1px solid #e2e8f0",
         padding: "15px",
         marginBottom: "10px",
         borderRadius: "10px",
-        backgroundColor: "var(--card)"
+        backgroundColor: "#ffffff"
       }}
     >
       <h4>{task.title}</h4>
@@ -47,7 +47,7 @@ export default function TaskCard({
       <button
         onClick={() => onDelete(task.id)}
         style={{
-          backgroundColor: "var(--danger)",
+          backgroundColor: "#ef4444",
           color: "white",
           border: "none",
           padding: "6px 10px",

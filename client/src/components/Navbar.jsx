@@ -7,8 +7,8 @@ export default function Navbar() {
     <div
       style={{
         width: "100%",
-        borderBottom: "1px solid var(--border)",
-        backgroundColor: "var(--card)"
+        borderBottom: "1px solid #e2e8f0",
+        backgroundColor: "#ffffff"
       }}
     >
       <div

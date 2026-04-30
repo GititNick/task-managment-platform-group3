@@ -10,4 +10,4 @@ services:
       - key: NODE_ENV
         value: production
     # Set the following secrets in the Render dashboard, not in source control:
-    # DATABASE_URL, AUTH0_DOMAIN, AUTH0_M2M_CLIENT_ID, AUTH0_M2M_CLIENT_SECRET
+    # DATABASE_URL, AUTH0_DOMAIN, AUTH0_M2M_CLIENT_ID, AUTH0_M2M_CLIENT_SECRET, HF_TOKEN

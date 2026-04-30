@@ -25,7 +25,7 @@ Render setup:
    - `AUTH0_DOMAIN`
    - `AUTH0_M2M_CLIENT_ID`
    - `AUTH0_M2M_CLIENT_SECRET`
-   - `HUGGINGFACE_API_KEY`
+   - `HF_TOKEN` (or `HUGGINGFACE_API_KEY`, both now work)
    - `HUGGINGFACE_MODEL` (optional, default: `Quen2.5-7B-Instruct`)
 6. Optionally, use the `render.yaml` file in the repo root to define the service configuration.
 
@@ -35,7 +35,7 @@ For the frontend deployed to Vercel, set:
 
 - `VITE_API_BASE_URL=https://<your-backend-url>`
 
-This makes the deployed React app call the backend service instead of relying on local proxying.
+This makes the deployed React app call the backend service instead of relying on local proxying. If `VITE_API_BASE_URL` is missing in production, the frontend will still call relative `/api/...` paths and your deployed site will fail unless the frontend and backend are on the same origin.
 
 ### Local development
 
@@ -44,7 +44,7 @@ This makes the deployed React app call the backend service instead of relying on
 
 The frontend development server proxies `/api` requests to `http://localhost:3001`.
 
-Make sure the backend has a valid `HUGGINGFACE_API_KEY` and a supported model in `HUGGINGFACE_MODEL`. The default `Qwen2.5-7BInstruct` model may not work for every HF account or plan, so swap it to another public text-generation model if you see AI service errors.
+Make sure the backend has a valid `HF_TOKEN` (or `HUGGINGFACE_API_KEY`) and a supported model in `HUGGINGFACE_MODEL`. The default `Qwen2.5-7BInstruct` model may not work for every HF account or plan, so swap it to another public text-generation model if you see AI service errors.
 
 ### Backend environment example
 

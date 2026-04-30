@@ -4,11 +4,12 @@ export default function TaskList({
   tasks,
   onDelete,
   onStatusChange,
-  onAssignChange
+  onAssignChange,
+  onAddSubtask
 }) {
   return (
     <div>
-      <h3>Your Tasks</h3>
+      <h3>Your Main Tasks</h3>
 
       {tasks.length === 0 ? (
         <p>No tasks yet</p>
@@ -20,6 +21,7 @@ export default function TaskList({
             onDelete={onDelete}
             onStatusChange={onStatusChange}
             onAssignChange={onAssignChange}
+            onAddSubtask={onAddSubtask}
           />
         ))
       )}

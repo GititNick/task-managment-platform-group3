@@ -5,6 +5,42 @@ import AddTask from "../components/AddTask";
 import AISuggestions from "../components/AISuggestions";
 import { apiUrl } from "../api";
 
+function normalizeTask(task) {
+  const statusMap = {
+    pending: "Todo",
+    "in-progress": "In Progress",
+    completed: "Done",
+  };
+
+  return {
+    id: task.id,
+    title: task.title,
+    status: statusMap[task.status] || task.status || "Todo",
+    assignedTo: "You",
+    description: task.description,
+    due_date: task.due_date,
+    parent_task_id: task.parent_task_id ?? null,
+  };
+}
+
+function buildTaskHierarchy(tasks) {
+  const taskMap = new Map(
+    tasks.map((task) => [task.id, { ...task, subtasks: [] }])
+  );
+  const mainTasks = [];
+
+  taskMap.forEach((task) => {
+    if (task.parent_task_id && taskMap.has(task.parent_task_id)) {
+      taskMap.get(task.parent_task_id).subtasks.push(task);
+      return;
+    }
+
+    mainTasks.push(task);
+  });
+
+  return mainTasks;
+}
+
 export default function Dashboard() {
   const { isAuthenticated, user, isLoading } = useAuth0();
   const [tasks, setTasks] = useState([]);
@@ -13,19 +49,38 @@ export default function Dashboard() {
   const [tasksLoading, setTasksLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Fetch user ID from database when user authenticates
+  // UI ADDITION: background color picker
+  const [bgColor, setBgColor] = useState(() => {
+  return localStorage.getItem("dashboardBgColor") || "#0f172a";
+});
+
+  // search + filter
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterType, setFilterType] = useState("none");
+
   useEffect(() => {
     if (isAuthenticated && user?.sub) {
       fetchUserId();
     }
   }, [isAuthenticated, user?.sub]);
 
-  // Fetch tasks when userId is available
   useEffect(() => {
     if (userId) {
       fetchUserTasks();
     }
   }, [userId]);
+
+  // Load saved background color for this user
+  useEffect(() => {
+  localStorage.setItem("dashboardBgColor", bgColor);
+}, [bgColor]);
+
+  // Save background color for this user whenever it changes
+  useEffect(() => {
+    if (user?.sub) {
+      localStorage.setItem(`dashboardBgColor:${user.sub}`, bgColor);
+    }
+  }, [bgColor, user?.sub]);
 
   const fetchUserId = async () => {
     try {
@@ -34,11 +89,9 @@ export default function Dashboard() {
         const data = await response.json();
         setUserId(data.user.id);
       } else {
-        console.error("User not found in database");
         setError("User not found. Please refresh the page.");
       }
     } catch (error) {
-      console.error("Error fetching user:", error);
       setError("Error loading user data");
     }
   };
@@ -49,26 +102,16 @@ export default function Dashboard() {
       const response = await fetch(apiUrl(`/api/tasks/user/${userId}`));
       if (response.ok) {
         const data = await response.json();
-        // Map database tasks to frontend format
-        const formattedTasks = data.tasks.map(task => ({
-          id: task.id,
-          title: task.title,
-          status: task.status || "Todo",
-          assignedTo: "You",
-          description: task.description,
-          due_date: task.due_date
-        }));
+        const formattedTasks = data.tasks.map(normalizeTask);
         setTasks(formattedTasks);
       }
     } catch (error) {
-      console.error("Error fetching tasks:", error);
       setError("Error loading tasks");
     } finally {
       setTasksLoading(false);
     }
   };
 
-  // ➕ Add task to database
   const handleAddTask = async () => {
     if (!newTask.trim()) return;
     if (!userId) {
@@ -79,29 +122,24 @@ export default function Dashboard() {
     try {
       const response = await fetch(apiUrl("/api/tasks"), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: userId,
           title: newTask,
           description: "",
-          status: "pending"
-        })
+          status: "pending",
+        }),
       });
 
       if (response.ok) {
         const data = await response.json();
         const task = data.task;
-        
-        // Add to local state
-        setTasks([...tasks, {
-          id: task.id,
-          title: task.title,
-          status: task.status || "Todo",
-          assignedTo: "You",
-          description: task.description
-        }]);
+
+        setTasks([
+          ...tasks,
+          normalizeTask(task),
+        ]);
+
         setNewTask("");
         setError("");
       } else {
@@ -109,72 +147,58 @@ export default function Dashboard() {
         setError(errorData.error || "Error creating task");
       }
     } catch (error) {
-      console.error("Error adding task:", error);
       setError("Error creating task");
     }
   };
 
-  // ❌ Delete task from database
   const handleDeleteTask = async (id) => {
     try {
       const response = await fetch(apiUrl(`/api/tasks/${id}`), {
-        method: "DELETE"
+        method: "DELETE",
       });
 
       if (response.ok) {
-        setTasks(tasks.filter(task => task.id !== id));
-        setError("");
+        setTasks(tasks.filter((task) => task.id !== id));
       } else {
         setError("Error deleting task");
       }
     } catch (error) {
-      console.error("Error deleting task:", error);
       setError("Error deleting task");
     }
   };
 
-  // 🔄 Update task status in database
   const handleStatusChange = async (id, newStatus) => {
     try {
       const response = await fetch(apiUrl(`/api/tasks/${id}`), {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          status: newStatus
-        })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
       });
 
       if (response.ok) {
-        setTasks(prevTasks =>
-          prevTasks.map(task =>
+        setTasks((prev) =>
+          prev.map((task) =>
             task.id === id ? { ...task, status: newStatus } : task
           )
         );
-        setError("");
       } else {
         setError("Error updating task");
       }
     } catch (error) {
-      console.error("Error updating task:", error);
       setError("Error updating task");
     }
   };
 
-  // 👤 Assign user (for now, just update local state as backend doesn't have assignment field)
   const handleAssignChange = (id, userName) => {
-    setTasks(prevTasks =>
-      prevTasks.map(task =>
+    setTasks((prev) =>
+      prev.map((task) =>
         task.id === id ? { ...task, assignedTo: userName } : task
       )
     );
   };
 
-  // Add AI suggestion as a new task
-  const handleAddSuggestion = async (suggestion) => {
-    if (!userId) {
-      setError("User ID not available. Please refresh the page.");
+  const handleAddSubtask = async (parentTaskId, title) => {
+    if (!userId || !title.trim()) {
       return;
     }
 
@@ -186,27 +210,149 @@ export default function Dashboard() {
         },
         body: JSON.stringify({
           user_id: userId,
-          title: suggestion,
+          parent_task_id: parentTaskId,
+          title: title.trim(),
           description: "",
-          status: "pending"
-        })
+          status: "pending",
+        }),
       });
 
       if (response.ok) {
         const data = await response.json();
-        const task = data.task;
-        
-        // Add to local state
-        setTasks([...tasks, {
-          id: task.id,
-          title: task.title,
-          status: task.status || "Todo",
-          assignedTo: "You",
-          description: task.description
-        }]);
+        setTasks((prev) => [...prev, normalizeTask(data.task)]);
         setError("");
       } else {
         const errorData = await response.json();
+        setError(errorData.error || "Error creating subtask");
+      }
+    } catch (error) {
+      setError("Error creating subtask");
+    }
+  };
+
+  const handleAddSuggestion = async (suggestionInput, options = {}) => {
+    if (!userId) {
+      setError("User ID not available. Please refresh the page.");
+      return;
+    }
+
+    try {
+      const parentTaskIds = Array.isArray(options.parentTaskIds)
+        ? options.parentTaskIds
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id))
+        : [];
+      const suggestions = Array.isArray(suggestionInput)
+        ? suggestionInput
+        : [suggestionInput];
+      const validSuggestions = suggestions.filter(
+        (item) => typeof item === "string" && item.trim() !== ""
+      );
+
+      if (validSuggestions.length === 0) {
+        return;
+      }
+
+      if (options.createMainTaskWithSubtasks && options.mainTaskTitle?.trim()) {
+        const mainTaskResponse = await fetch(apiUrl("/api/tasks"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            title: options.mainTaskTitle.trim(),
+            description: "",
+            status: "pending",
+          }),
+        });
+
+        if (!mainTaskResponse.ok) {
+          const errorData = await mainTaskResponse.json();
+          setError(errorData.error || "Error creating main task");
+          return;
+        }
+
+        const mainTaskData = await mainTaskResponse.json();
+        const mainTask = normalizeTask(mainTaskData.task);
+
+        const subtaskResponses = await Promise.all(
+          validSuggestions.map((suggestion) =>
+            fetch(apiUrl("/api/tasks"), {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                user_id: userId,
+                parent_task_id: mainTask.id,
+                title: suggestion,
+                description: "",
+                status: "pending",
+              }),
+            })
+          )
+        );
+
+        const failedSubtaskResponse = subtaskResponses.find(
+          (response) => !response.ok
+        );
+
+        if (failedSubtaskResponse) {
+          const errorData = await failedSubtaskResponse.json();
+          setError(errorData.error || "Error creating subtasks");
+          return;
+        }
+
+        const subtaskData = await Promise.all(
+          subtaskResponses.map((response) => response.json())
+        );
+        const createdSubtasks = subtaskData.map(({ task }) => normalizeTask(task));
+
+        setTasks((prev) => [...prev, mainTask, ...createdSubtasks]);
+        setError("");
+        return;
+      }
+
+      const taskPayloads =
+        options.asSubtasks && parentTaskIds.length > 0
+          ? parentTaskIds.flatMap((parentTaskId) =>
+              validSuggestions.map((suggestion) => ({
+                user_id: userId,
+                parent_task_id: parentTaskId,
+                title: suggestion,
+                description: "",
+                status: "pending",
+              }))
+            )
+          : validSuggestions.map((suggestion) => ({
+              user_id: userId,
+              title: suggestion,
+              description: "",
+              status: "pending",
+            }));
+
+      const responses = await Promise.all(
+        taskPayloads.map((payload) =>
+          fetch(apiUrl("/api/tasks"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          })
+        )
+      );
+
+      const failedResponse = responses.find((response) => !response.ok);
+      if (!failedResponse) {
+        const data = await Promise.all(responses.map((response) => response.json()));
+        const createdTasks = data.map(({ task }) => normalizeTask(task));
+
+        setTasks((prev) => [...prev, ...createdTasks]);
+        setError("");
+      } else {
+        const errorData = await failedResponse.json();
         setError(errorData.error || "Error creating task");
       }
     } catch (error) {
@@ -215,50 +361,106 @@ export default function Dashboard() {
     }
   };
 
+  let filteredTasks = tasks.filter((task) =>
+    task.title.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  if (filterType === "alphabetical") {
+    filteredTasks.sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  if (filterType === "status") {
+    const statusOrder = { Todo: 1, "In Progress": 2, Done: 3 };
+    filteredTasks.sort(
+      (a, b) => (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99)
+    );
+  }
+
+  const hierarchicalTasks = buildTaskHierarchy(filteredTasks);
+
   if (isLoading) return <div>Loading...</div>;
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h1>Task Management Dashboard</h1>
+    <div
+      style={{
+        minHeight: "100vh",
+        padding: "30px",
+        background: bgColor,
+        color: "white",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <div style={{ maxWidth: "900px", margin: "0 auto" }}>
+        <h1>Task Management Dashboard</h1>
 
-      <hr />
-
-      {error && (
-        <div style={{ color: "red", marginBottom: "10px", padding: "10px", backgroundColor: "#ffe0e0", borderRadius: "5px" }}>
-          {error}
+        <div style={{ marginBottom: "15px" }}>
+          <label style={{ marginRight: "10px" }}>Pick Background Color:</label>
+          <input
+            type="color"
+            value={bgColor}
+            onChange={(e) => setBgColor(e.target.value)}
+          />
         </div>
-      )}
 
-      {!isAuthenticated && (
-        <p>Please log in using the button in the top right.</p>
-      )}
+        <hr />
 
-      {isAuthenticated && (
-        <>
-          <h2>Welcome {user?.email}</h2>
+        {error && (
+          <div style={{ color: "red", marginBottom: "10px" }}>{error}</div>
+        )}
 
-          {tasksLoading ? (
-            <p>Loading tasks...</p>
-          ) : (
-            <>
-              <AddTask
-                newTask={newTask}
-                setNewTask={setNewTask}
-                handleAddTask={handleAddTask}
-              />
+        {!isAuthenticated && <p>Please log in using the button.</p>}
 
-              <AISuggestions onAddSuggestion={handleAddSuggestion} userId={userId} tasks={tasks} />
+        {isAuthenticated && (
+          <>
+            <h2>Welcome {user?.email}</h2>
 
-              <TaskList
-                tasks={tasks}
-                onDelete={handleDeleteTask}
-                onStatusChange={handleStatusChange}
-                onAssignChange={handleAssignChange}
-              />
-            </>
-          )}
-        </>
-      )}
+            {tasksLoading ? (
+              <p>Loading tasks...</p>
+            ) : (
+              <>
+                <AddTask
+                  newTask={newTask}
+                  setNewTask={setNewTask}
+                  handleAddTask={handleAddTask}
+                />
+
+                <div style={{ margin: "10px 0" }}>
+                  <input
+                    placeholder="Search tasks..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={{ marginRight: "10px", padding: "5px" }}
+                  />
+
+                  <select
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value)}
+                    style={{ padding: "5px" }}
+                  >
+                    <option value="none">No Filter</option>
+                    <option value="alphabetical">A-Z</option>
+                    <option value="status">Status</option>
+                  </select>
+                </div>
+
+                <AISuggestions
+                  onAddSuggestion={handleAddSuggestion}
+                  userId={userId}
+                  tasks={tasks.filter((task) => !task.parent_task_id)}
+                />
+
+                <TaskList
+                  tasks={hierarchicalTasks}
+                  onDelete={handleDeleteTask}
+                  onStatusChange={handleStatusChange}
+                  onAssignChange={handleAssignChange}
+                  onAddSubtask={handleAddSubtask}
+                />
+              </>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ CREATE TABLE users (
 CREATE TABLE tasks (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  parent_task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
   title VARCHAR(255) NOT NULL,
   description TEXT,
   status VARCHAR(50) DEFAULT 'pending',
@@ -38,3 +39,4 @@ INSERT INTO tasks (user_id, title, description, status, due_date) VALUES
 
 -- Create index on user_id for faster queries
 CREATE INDEX idx_tasks_user_id ON tasks(user_id);
+CREATE INDEX idx_tasks_parent_task_id ON tasks(parent_task_id);

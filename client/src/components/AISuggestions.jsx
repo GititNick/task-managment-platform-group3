@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { apiUrl } from "../api";
 
-export default function AISuggestions({ onAddSuggestion, userId, tasks = [] }) {
+export default function AISuggestions({ onAddSuggestion, onAddAllSuggestions, userId, tasks = [] }) {
   const [prompt, setPrompt] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -72,6 +72,13 @@ export default function AISuggestions({ onAddSuggestion, userId, tasks = [] }) {
     setPrompt("");
   };
 
+  const handleAddAllSuggestions = async () => {
+    if (!suggestions.length) return;
+    await onAddAllSuggestions(suggestions);
+    setSuggestions([]);
+    setPrompt("");
+  };
+
   return (
     <div style={{ margin: "20px 0", padding: "20px", border: "1px solid #ddd", borderRadius: "8px" }}>
       <h3>AI Task Assistant</h3>
@@ -110,6 +117,20 @@ export default function AISuggestions({ onAddSuggestion, userId, tasks = [] }) {
       {suggestions.length > 0 && (
         <div>
           <h4>Suggested Tasks:</h4>
+          <button
+            onClick={handleAddAllSuggestions}
+            style={{
+              backgroundColor: "#198754",
+              color: "white",
+              border: "none",
+              padding: "8px 12px",
+              borderRadius: "4px",
+              cursor: "pointer",
+              marginBottom: "10px"
+            }}
+          >
+            Add All Suggestions
+          </button>
           <ul style={{ listStyle: "none", padding: 0 }}>
             {suggestions.map((suggestion, index) => (
               <li key={index} style={{ marginBottom: "10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>

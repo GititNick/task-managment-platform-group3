@@ -33,9 +33,41 @@ export default function Dashboard() {
       if (response.ok) {
         const data = await response.json();
         setUserId(data.user.id);
+        setError("");
       } else {
-        console.error("User not found in database");
-        setError("User not found. Please refresh the page.");
+        // If the user doesn't exist yet, create/sync them and continue.
+        if (response.status === 404) {
+          if (!user.email) {
+            setError("Your Auth0 profile is missing an email. Enable the email scope/claim and try again.");
+            return;
+          }
+
+          const syncResponse = await fetch(apiUrl("/api/auth/sync-user"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              auth0_id: user.sub,
+              name: user.name || user.nickname || "User",
+              email: user.email,
+            }),
+          });
+
+          if (syncResponse.ok) {
+            const syncData = await syncResponse.json();
+            setUserId(syncData.user.id);
+            setError("");
+          } else {
+            const syncError = await syncResponse.json();
+            console.error("Sync failed:", syncError);
+            setError(syncError.error || "Unable to sync user profile.");
+          }
+        } else {
+          const errData = await response.json().catch(() => ({}));
+          console.error("User lookup failed:", errData);
+          setError(errData.error || "Error loading user data");
+        }
       }
     } catch (error) {
       console.error("Error fetching user:", error);
@@ -197,7 +229,7 @@ export default function Dashboard() {
         const task = data.task;
         
         // Add to local state
-        setTasks([...tasks, {
+        setTasks(prevTasks => [...prevTasks, {
           id: task.id,
           title: task.title,
           status: task.status || "Todo",
@@ -212,6 +244,61 @@ export default function Dashboard() {
     } catch (error) {
       console.error("Error adding task:", error);
       setError("Error creating task");
+    }
+  };
+
+  const handleAddAllSuggestions = async (suggestions) => {
+    if (!userId) {
+      setError("User ID not available. Please refresh the page.");
+      return;
+    }
+
+    try {
+      const responses = await Promise.all(
+        suggestions.map((suggestion) =>
+          fetch(apiUrl("/api/tasks"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              user_id: userId,
+              title: suggestion,
+              description: "",
+              status: "pending",
+            }),
+          })
+        )
+      );
+
+      const failed = responses.filter((response) => !response.ok);
+      if (failed.length > 0) {
+        setError(`Added ${responses.length - failed.length} task(s); ${failed.length} failed.`);
+      } else {
+        setError("");
+      }
+
+      const successfulTasks = [];
+      for (const response of responses) {
+        if (!response.ok) continue;
+        const data = await response.json();
+        const task = data.task;
+        successfulTasks.push({
+          id: task.id,
+          title: task.title,
+          status: task.status || "Todo",
+          assignedTo: "You",
+          description: task.description,
+          due_date: task.due_date,
+        });
+      }
+
+      if (successfulTasks.length > 0) {
+        setTasks((prevTasks) => [...prevTasks, ...successfulTasks]);
+      }
+    } catch (error) {
+      console.error("Error adding suggested tasks:", error);
+      setError("Error creating suggested tasks");
     }
   };
 
@@ -247,7 +334,12 @@ export default function Dashboard() {
                 handleAddTask={handleAddTask}
               />
 
-              <AISuggestions onAddSuggestion={handleAddSuggestion} userId={userId} tasks={tasks} />
+              <AISuggestions
+                onAddSuggestion={handleAddSuggestion}
+                onAddAllSuggestions={handleAddAllSuggestions}
+                userId={userId}
+                tasks={tasks}
+              />
 
               <TaskList
                 tasks={tasks}

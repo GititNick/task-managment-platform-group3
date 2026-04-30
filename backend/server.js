@@ -53,6 +53,42 @@ client.connect((err) => {
   }
 });
 
+// Upsert user while honoring unique constraints on both auth0_id and email.
+async function upsertAuth0User(auth0Id, name, email) {
+  try {
+    const result = await client.query(
+      `INSERT INTO users (auth0_id, name, email)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (auth0_id) DO UPDATE
+         SET name = EXCLUDED.name,
+             email = EXCLUDED.email,
+             updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [auth0Id, name, email]
+    );
+    return result.rows[0];
+  } catch (error) {
+    // If another row already owns this email, merge onto that row.
+    if (error.code === '23505' && error.constraint === 'users_email_key') {
+      const fallback = await client.query(
+        `UPDATE users
+         SET auth0_id = $1,
+             name = $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE email = $3
+         RETURNING *`,
+        [auth0Id, name, email]
+      );
+
+      if (fallback.rows.length > 0) {
+        return fallback.rows[0];
+      }
+    }
+
+    throw error;
+  }
+}
+
 // Sync all Auth0 users to Neon (runs on startup)
 async function syncAllAuth0Users() {
   try {
@@ -91,15 +127,7 @@ async function syncAllAuth0Users() {
     const auth0Users = await usersRes.json();
 
     for (const u of auth0Users) {
-      await client.query(
-        `INSERT INTO users (auth0_id, name, email)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (auth0_id) DO UPDATE
-           SET name = EXCLUDED.name,
-               email = EXCLUDED.email,
-               updated_at = CURRENT_TIMESTAMP`,
-        [u.user_id, u.name || u.nickname || u.email, u.email]
-      );
+      await upsertAuth0User(u.user_id, u.name || u.nickname || u.email, u.email);
     }
 
     console.log(`Synced ${auth0Users.length} Auth0 user(s) to database`);
@@ -183,17 +211,12 @@ app.post('/api/auth/sync-all-users', async (req, res) => {
 
     const results = [];
     for (const u of auth0Users) {
-      const result = await client.query(
-        `INSERT INTO users (auth0_id, name, email)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (auth0_id) DO UPDATE
-           SET name = EXCLUDED.name,
-               email = EXCLUDED.email,
-               updated_at = CURRENT_TIMESTAMP
-         RETURNING *`,
-        [u.user_id, u.name || u.nickname || u.email, u.email]
+      const row = await upsertAuth0User(
+        u.user_id,
+        u.name || u.nickname || u.email,
+        u.email
       );
-      results.push(result.rows[0]);
+      results.push(row);
     }
 
     res.json({
@@ -215,27 +238,11 @@ app.post('/api/auth/sync-user', async (req, res) => {
       return res.status(400).json({ error: 'auth0_id and email are required' });
     }
 
-    const existingUser = await client.query(
-      'SELECT * FROM users WHERE auth0_id = $1',
-      [auth0_id]
-    );
-
-    let result;
-    if (existingUser.rows.length > 0) {
-      result = await client.query(
-        'UPDATE users SET name = $1, email = $2, updated_at = CURRENT_TIMESTAMP WHERE auth0_id = $3 RETURNING *',
-        [name, email, auth0_id]
-      );
-    } else {
-      result = await client.query(
-        'INSERT INTO users (auth0_id, name, email) VALUES ($1, $2, $3) RETURNING *',
-        [auth0_id, name, email]
-      );
-    }
+    const row = await upsertAuth0User(auth0_id, name, email);
 
     res.status(201).json({
       status: 'User synced',
-      user: result.rows[0],
+      user: row,
     });
   } catch (error) {
     res.status(500).json({

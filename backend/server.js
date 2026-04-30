@@ -37,24 +37,10 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Initialize PostgreSQL client. Use SSL for hosted DBs (e.g., Neon),
-// but disable SSL for local development connections.
-const databaseUrl = process.env.DATABASE_URL;
-let useSsl = true;
-
-if (databaseUrl) {
-  try {
-    const dbHost = new URL(databaseUrl).hostname;
-    useSsl = !['localhost', '127.0.0.1', '::1'].includes(dbHost);
-  } catch {
-    // Keep SSL enabled as a safe default if URL parsing fails.
-    useSsl = true;
-  }
-}
-
+// Initialize Neon PostgreSQL client
 const client = new pg.Client({
-  connectionString: databaseUrl,
-  ssl: useSsl ? { rejectUnauthorized: false } : false,
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
 });
 
 // Connect to database
@@ -108,9 +94,9 @@ async function syncAllAuth0Users() {
       await client.query(
         `INSERT INTO users (auth0_id, name, email)
          VALUES ($1, $2, $3)
-         ON CONFLICT (email) DO UPDATE
-           SET auth0_id = EXCLUDED.auth0_id,
-               name = EXCLUDED.name,
+         ON CONFLICT (auth0_id) DO UPDATE
+           SET name = EXCLUDED.name,
+               email = EXCLUDED.email,
                updated_at = CURRENT_TIMESTAMP`,
         [u.user_id, u.name || u.nickname || u.email, u.email]
       );
@@ -200,9 +186,9 @@ app.post('/api/auth/sync-all-users', async (req, res) => {
       const result = await client.query(
         `INSERT INTO users (auth0_id, name, email)
          VALUES ($1, $2, $3)
-         ON CONFLICT (email) DO UPDATE
-           SET auth0_id = EXCLUDED.auth0_id,
-               name = EXCLUDED.name,
+         ON CONFLICT (auth0_id) DO UPDATE
+           SET name = EXCLUDED.name,
+               email = EXCLUDED.email,
                updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
         [u.user_id, u.name || u.nickname || u.email, u.email]
@@ -229,16 +215,23 @@ app.post('/api/auth/sync-user', async (req, res) => {
       return res.status(400).json({ error: 'auth0_id and email are required' });
     }
 
-    const result = await client.query(
-      `INSERT INTO users (auth0_id, name, email)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (email) DO UPDATE
-         SET auth0_id = EXCLUDED.auth0_id,
-             name = EXCLUDED.name,
-             updated_at = CURRENT_TIMESTAMP
-       RETURNING *`,
-      [auth0_id, name, email]
+    const existingUser = await client.query(
+      'SELECT * FROM users WHERE auth0_id = $1',
+      [auth0_id]
     );
+
+    let result;
+    if (existingUser.rows.length > 0) {
+      result = await client.query(
+        'UPDATE users SET name = $1, email = $2, updated_at = CURRENT_TIMESTAMP WHERE auth0_id = $3 RETURNING *',
+        [name, email, auth0_id]
+      );
+    } else {
+      result = await client.query(
+        'INSERT INTO users (auth0_id, name, email) VALUES ($1, $2, $3) RETURNING *',
+        [auth0_id, name, email]
+      );
+    }
 
     res.status(201).json({
       status: 'User synced',

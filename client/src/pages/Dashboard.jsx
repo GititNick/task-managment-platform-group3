@@ -1,9 +1,39 @@
 import { useAuth0 } from "@auth0/auth0-react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import TaskList from "../components/TaskList";
 import AddTask from "../components/AddTask";
 import AISuggestions from "../components/AISuggestions";
 import { apiUrl } from "../api";
+
+/** POST /api/auth/sync-user — returns numeric DB user id (throws on failure). */
+async function syncAuth0UserToDb(user) {
+  if (!user?.sub) {
+    throw new Error("Not signed in");
+  }
+  const email =
+    user.email ||
+    `auth0-${user.sub.replace(/[^a-zA-Z0-9]/g, "_")}@placeholder.local`;
+  const response = await fetch(apiUrl("/api/auth/sync-user"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      auth0_id: user.sub,
+      name: user.name || user.nickname || "User",
+      email,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      data.error ||
+        "Could not sync user. Is the backend running (e.g. port 3001)?"
+    );
+  }
+  if (data.user?.id == null) {
+    throw new Error("Invalid response from server while syncing user.");
+  }
+  return data.user.id;
+}
 
 export default function Dashboard() {
   const { isAuthenticated, user, isLoading } = useAuth0();
@@ -11,14 +41,60 @@ export default function Dashboard() {
   const [newTask, setNewTask] = useState("");
   const [userId, setUserId] = useState(null);
   const [tasksLoading, setTasksLoading] = useState(false);
+  const [userSyncPending, setUserSyncPending] = useState(false);
   const [error, setError] = useState("");
+  const userIdRef = useRef(null);
+  userIdRef.current = userId;
 
-  // Fetch user ID from database when user authenticates
-  useEffect(() => {
+  // useEffect runs after paint; flip this in layout so we never flash "profile could not be loaded" before sync starts.
+  useLayoutEffect(() => {
     if (isAuthenticated && user?.sub) {
-      fetchUserId();
+      setUserSyncPending(true);
     }
   }, [isAuthenticated, user?.sub]);
+
+  // Create or update the DB user (same as App); keep userSyncPending so we do not show task UI before id exists.
+  useEffect(() => {
+    if (!isAuthenticated || !user?.sub) {
+      setUserId(null);
+      setUserSyncPending(false);
+      return;
+    }
+
+    let cancelled = false;
+    setUserSyncPending(true);
+
+    (async () => {
+      try {
+        const id = await syncAuth0UserToDb(user);
+        if (cancelled) return;
+        setUserId(id);
+        setError("");
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Error syncing user:", err);
+          setError(
+            err.message ||
+              "Error loading user. Use the Vite dev server so /api is proxied to the backend."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setUserSyncPending(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isAuthenticated,
+    user?.sub,
+    user?.email,
+    user?.name,
+    user?.nickname,
+  ]);
 
   // Fetch tasks when userId is available
   useEffect(() => {
@@ -26,54 +102,6 @@ export default function Dashboard() {
       fetchUserTasks();
     }
   }, [userId]);
-
-  const fetchUserId = async () => {
-    try {
-      const response = await fetch(apiUrl(`/api/users/auth0/${user.sub}`));
-      if (response.ok) {
-        const data = await response.json();
-        setUserId(data.user.id);
-        setError("");
-      } else {
-        // If the user doesn't exist yet, create/sync them and continue.
-        if (response.status === 404) {
-          if (!user.email) {
-            setError("Your Auth0 profile is missing an email. Enable the email scope/claim and try again.");
-            return;
-          }
-
-          const syncResponse = await fetch(apiUrl("/api/auth/sync-user"), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              auth0_id: user.sub,
-              name: user.name || user.nickname || "User",
-              email: user.email,
-            }),
-          });
-
-          if (syncResponse.ok) {
-            const syncData = await syncResponse.json();
-            setUserId(syncData.user.id);
-            setError("");
-          } else {
-            const syncError = await syncResponse.json();
-            console.error("Sync failed:", syncError);
-            setError(syncError.error || "Unable to sync user profile.");
-          }
-        } else {
-          const errData = await response.json().catch(() => ({}));
-          console.error("User lookup failed:", errData);
-          setError(errData.error || "Error loading user data");
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching user:", error);
-      setError("Error loading user data");
-    }
-  };
 
   const fetchUserTasks = async () => {
     try {
@@ -100,13 +128,29 @@ export default function Dashboard() {
     }
   };
 
+  /** Ensures DB user id exists (handles click before initial sync finishes). */
+  const resolveUserId = async () => {
+    if (userIdRef.current != null) return userIdRef.current;
+    if (!user) {
+      setError("Not signed in.");
+      return null;
+    }
+    try {
+      const id = await syncAuth0UserToDb(user);
+      setUserId(id);
+      setError("");
+      return id;
+    } catch (err) {
+      setError(err.message || "Could not load your account.");
+      return null;
+    }
+  };
+
   // ➕ Add task to database
   const handleAddTask = async () => {
     if (!newTask.trim()) return;
-    if (!userId) {
-      setError("User ID not available. Please refresh the page.");
-      return;
-    }
+    const uid = await resolveUserId();
+    if (uid == null) return;
 
     try {
       const response = await fetch(apiUrl("/api/tasks"), {
@@ -115,7 +159,7 @@ export default function Dashboard() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          user_id: userId,
+          user_id: uid,
           title: newTask,
           description: "",
           status: "pending"
@@ -205,10 +249,8 @@ export default function Dashboard() {
 
   // Add AI suggestion as a new task
   const handleAddSuggestion = async (suggestion) => {
-    if (!userId) {
-      setError("User ID not available. Please refresh the page.");
-      return;
-    }
+    const uid = await resolveUserId();
+    if (uid == null) return false;
 
     try {
       const response = await fetch(apiUrl("/api/tasks"), {
@@ -217,7 +259,7 @@ export default function Dashboard() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          user_id: userId,
+          user_id: uid,
           title: suggestion,
           description: "",
           status: "pending"
@@ -227,78 +269,81 @@ export default function Dashboard() {
       if (response.ok) {
         const data = await response.json();
         const task = data.task;
-        
-        // Add to local state
-        setTasks(prevTasks => [...prevTasks, {
+
+        setTasks((prev) => [
+          ...prev,
+          {
+            id: task.id,
+            title: task.title,
+            status: task.status || "Todo",
+            assignedTo: "You",
+            description: task.description
+          }
+        ]);
+        setError("");
+        return true;
+      }
+      const errorData = await response.json();
+      setError(errorData.error || "Error creating task");
+      return false;
+    } catch (error) {
+      console.error("Error adding task:", error);
+      setError("Error creating task");
+      return false;
+    }
+  };
+
+  const handleAddSuggestions = async (suggestionsList) => {
+    const uid = await resolveUserId();
+    if (uid == null) return false;
+    if (!suggestionsList.length) return true;
+
+    const added = [];
+    try {
+      for (const title of suggestionsList) {
+        const response = await fetch(apiUrl("/api/tasks"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            user_id: uid,
+            title,
+            description: "",
+            status: "pending"
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          setError(errorData.error || "Error creating task");
+          if (added.length) {
+            setTasks((prev) => [...prev, ...added]);
+          }
+          return false;
+        }
+
+        const data = await response.json();
+        const task = data.task;
+        added.push({
           id: task.id,
           title: task.title,
           status: task.status || "Todo",
           assignedTo: "You",
           description: task.description
-        }]);
-        setError("");
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || "Error creating task");
-      }
-    } catch (error) {
-      console.error("Error adding task:", error);
-      setError("Error creating task");
-    }
-  };
-
-  const handleAddAllSuggestions = async (suggestions) => {
-    if (!userId) {
-      setError("User ID not available. Please refresh the page.");
-      return;
-    }
-
-    try {
-      const responses = await Promise.all(
-        suggestions.map((suggestion) =>
-          fetch(apiUrl("/api/tasks"), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              user_id: userId,
-              title: suggestion,
-              description: "",
-              status: "pending",
-            }),
-          })
-        )
-      );
-
-      const failed = responses.filter((response) => !response.ok);
-      if (failed.length > 0) {
-        setError(`Added ${responses.length - failed.length} task(s); ${failed.length} failed.`);
-      } else {
-        setError("");
-      }
-
-      const successfulTasks = [];
-      for (const response of responses) {
-        if (!response.ok) continue;
-        const data = await response.json();
-        const task = data.task;
-        successfulTasks.push({
-          id: task.id,
-          title: task.title,
-          status: task.status || "Todo",
-          assignedTo: "You",
-          description: task.description,
-          due_date: task.due_date,
         });
       }
 
-      if (successfulTasks.length > 0) {
-        setTasks((prevTasks) => [...prevTasks, ...successfulTasks]);
-      }
+      setTasks((prev) => [...prev, ...added]);
+      setError("");
+      return true;
     } catch (error) {
-      console.error("Error adding suggested tasks:", error);
-      setError("Error creating suggested tasks");
+      console.error("Error adding tasks:", error);
+      setError("Error creating task");
+      if (added.length) {
+        setTasks((prev) => [...prev, ...added]);
+      }
+      return false;
     }
   };
 
@@ -324,8 +369,15 @@ export default function Dashboard() {
         <>
           <h2>Welcome {user?.email}</h2>
 
-          {tasksLoading ? (
+          {userSyncPending && userId == null ? (
+            <p style={{ color: "#555" }}>Connecting your account…</p>
+          ) : tasksLoading ? (
             <p>Loading tasks...</p>
+          ) : userId == null ? (
+            <p style={{ color: "#555" }}>
+              Your profile could not be loaded. Fix the issue shown above, then
+              refresh the page.
+            </p>
           ) : (
             <>
               <AddTask
@@ -336,7 +388,7 @@ export default function Dashboard() {
 
               <AISuggestions
                 onAddSuggestion={handleAddSuggestion}
-                onAddAllSuggestions={handleAddAllSuggestions}
+                onAddSuggestions={handleAddSuggestions}
                 userId={userId}
                 tasks={tasks}
               />

@@ -4,6 +4,12 @@ export default function AddTask({
   handleAddTask,
   disabled = false,
 }) {
+  const onInputKeyDown = (e) => {
+    if (e.key === "Enter" && !disabled) {
+      handleAddTask();
+    }
+  };
+
   return (
     <div style={{ margin: "20px 0", display: "flex", gap: "10px" }}>
       <input
@@ -11,6 +17,7 @@ export default function AddTask({
         placeholder="Enter new task..."
         value={newTask}
         onChange={(e) => setNewTask(e.target.value)}
+        onKeyDown={onInputKeyDown}
         disabled={disabled}
         style={{
           padding: "10px",
@@ -23,7 +30,7 @@ export default function AddTask({
 
       <button
         type="button"
-        onClick={handleAddTask}
+        onClick={() => handleAddTask()}
         disabled={disabled}
         style={{
           backgroundColor: "var(--primary)",

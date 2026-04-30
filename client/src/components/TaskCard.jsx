@@ -1,9 +1,21 @@
+import { useState } from "react";
+
 export default function TaskCard({
   task,
   onDelete,
   onStatusChange,
-  onAssignChange
+  onAssignChange,
+  onAddSubtask,
+  isSubtask = false
 }) {
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+
+  const submitSubtask = async () => {
+    if (!newSubtaskTitle.trim() || !onAddSubtask) return;
+    await onAddSubtask(task.id, newSubtaskTitle);
+    setNewSubtaskTitle("");
+  };
+
   return (
     <div
       style={{
@@ -13,8 +25,11 @@ export default function TaskCard({
         borderRadius: "10px",
         backgroundColor: "var(--card)"
       }}
-    >
-      <h4>{task.title}</h4>
+      >
+      <h4 style={{ marginTop: 0 }}>
+        {isSubtask ? "Subtask: " : ""}
+        {task.title}
+      </h4>
 
       <div style={{ marginBottom: "10px" }}>
         <label>Status: </label>
@@ -56,6 +71,37 @@ export default function TaskCard({
       >
         Delete
       </button>
+
+      {!isSubtask && (
+        <div style={{ marginTop: "12px", display: "flex", gap: "8px" }}>
+          <input
+            type="text"
+            value={newSubtaskTitle}
+            onChange={(e) => setNewSubtaskTitle(e.target.value)}
+            placeholder="Add subtask..."
+            style={{
+              flex: 1,
+              padding: "8px",
+              borderRadius: "6px",
+              border: "1px solid var(--border)"
+            }}
+          />
+          <button
+            type="button"
+            onClick={submitSubtask}
+            style={{
+              backgroundColor: "var(--primary)",
+              color: "white",
+              border: "none",
+              padding: "8px 10px",
+              borderRadius: "6px",
+              cursor: "pointer"
+            }}
+          >
+            Add Subtask
+          </button>
+        </div>
+      )}
     </div>
   );
 }

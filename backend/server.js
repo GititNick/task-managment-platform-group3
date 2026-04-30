@@ -49,9 +49,26 @@ client.connect((err) => {
     console.error('Database connection error:', err);
   } else {
     console.log('Connected to Neon PostgreSQL');
+    ensureTaskParentColumn();
     syncAllAuth0Users();
   }
 });
+
+async function ensureTaskParentColumn() {
+  try {
+    await client.query(`
+      ALTER TABLE tasks
+      ADD COLUMN IF NOT EXISTS parent_task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tasks_parent_task_id ON tasks(parent_task_id)
+    `);
+  } catch (error) {
+    if (error.code !== '42P01') {
+      console.error('Error ensuring parent_task_id on tasks:', error.message);
+    }
+  }
+}
 
 // Upsert user while honoring unique constraints on both auth0_id and email.
 async function upsertAuth0User(auth0Id, name, email) {
@@ -348,15 +365,32 @@ app.get('/api/users', async (req, res) => {
 // Create a new task
 app.post('/api/tasks', async (req, res) => {
   try {
-    const { user_id, title, description, status, due_date } = req.body;
+    const { user_id, title, description, status, due_date, parent_task_id } = req.body;
 
     if (!user_id || !title) {
       return res.status(400).json({ error: 'user_id and title are required' });
     }
 
+    if (parent_task_id != null) {
+      const parentCheck = await client.query(
+        'SELECT id FROM tasks WHERE id = $1 AND user_id = $2',
+        [parent_task_id, user_id]
+      );
+      if (parentCheck.rows.length === 0) {
+        return res.status(400).json({ error: 'Invalid parent task for this user' });
+      }
+    }
+
     const result = await client.query(
-      'INSERT INTO tasks (user_id, title, description, status, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [user_id, title, description || '', status || 'pending', due_date || null]
+      'INSERT INTO tasks (user_id, title, description, status, due_date, parent_task_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [
+        user_id,
+        title,
+        description || '',
+        status || 'pending',
+        due_date || null,
+        parent_task_id ?? null,
+      ]
     );
 
     res.status(201).json({
@@ -418,16 +452,46 @@ app.get('/api/tasks/:id', async (req, res) => {
 app.put('/api/tasks/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, status, due_date } = req.body;
+    const { title, description, status, due_date, parent_task_id } = req.body;
 
-    const result = await client.query(
-      'UPDATE tasks SET title = COALESCE($1, title), description = COALESCE($2, description), status = COALESCE($3, status), due_date = COALESCE($4, due_date), updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *',
-      [title, description, status, due_date, id]
+    const existingTaskResult = await client.query(
+      'SELECT id, user_id FROM tasks WHERE id = $1',
+      [id]
     );
 
-    if (result.rows.length === 0) {
+    if (existingTaskResult.rows.length === 0) {
       return res.status(404).json({ error: 'Task not found' });
     }
+
+    const existingTask = existingTaskResult.rows[0];
+
+    if (parent_task_id != null) {
+      if (Number(parent_task_id) === Number(id)) {
+        return res.status(400).json({ error: 'A task cannot be its own parent' });
+      }
+
+      const parentCheck = await client.query(
+        'SELECT id FROM tasks WHERE id = $1 AND user_id = $2',
+        [parent_task_id, existingTask.user_id]
+      );
+
+      if (parentCheck.rows.length === 0) {
+        return res.status(400).json({ error: 'Invalid parent task for this user' });
+      }
+    }
+
+    const result = await client.query(
+      `UPDATE tasks
+       SET title = COALESCE($1, title),
+           description = COALESCE($2, description),
+           status = COALESCE($3, status),
+           due_date = COALESCE($4, due_date),
+           parent_task_id = COALESCE($5, parent_task_id),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $6
+       RETURNING *`,
+      [title, description, status, due_date, parent_task_id, id]
+    );
 
     res.json({
       status: 'Task updated',

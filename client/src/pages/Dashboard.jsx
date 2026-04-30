@@ -41,6 +41,7 @@ export default function Dashboard() {
   const [newTask, setNewTask] = useState("");
   const [userId, setUserId] = useState(null);
   const [tasksLoading, setTasksLoading] = useState(false);
+  const [addingTask, setAddingTask] = useState(false);
   const [userSyncPending, setUserSyncPending] = useState(false);
   const [error, setError] = useState("");
   const userIdRef = useRef(null);
@@ -116,7 +117,8 @@ export default function Dashboard() {
           status: task.status || "Todo",
           assignedTo: "You",
           description: task.description,
-          due_date: task.due_date
+          due_date: task.due_date,
+          parent_task_id: task.parent_task_id ?? null
         }));
         setTasks(formattedTasks);
       }
@@ -147,12 +149,16 @@ export default function Dashboard() {
   };
 
   // ➕ Add task to database
-  const handleAddTask = async () => {
-    if (!newTask.trim()) return;
+  const handleAddTask = async (titleOverride = null, parentTaskId = null) => {
+    const normalizedTitleOverride =
+      typeof titleOverride === "string" ? titleOverride : null;
+    const taskTitle = (normalizedTitleOverride ?? newTask).trim();
+    if (!taskTitle || addingTask) return null;
     const uid = await resolveUserId();
-    if (uid == null) return;
+    if (uid == null) return null;
 
     try {
+      setAddingTask(true);
       const response = await fetch(apiUrl("/api/tasks"), {
         method: "POST",
         headers: {
@@ -160,9 +166,10 @@ export default function Dashboard() {
         },
         body: JSON.stringify({
           user_id: uid,
-          title: newTask,
+          title: taskTitle,
           description: "",
-          status: "pending"
+          status: "pending",
+          parent_task_id: parentTaskId
         })
       });
 
@@ -171,22 +178,31 @@ export default function Dashboard() {
         const task = data.task;
         
         // Add to local state
-        setTasks([...tasks, {
+        const formattedTask = {
           id: task.id,
           title: task.title,
           status: task.status || "Todo",
           assignedTo: "You",
-          description: task.description
-        }]);
-        setNewTask("");
+          description: task.description,
+          parent_task_id: task.parent_task_id ?? null
+        };
+        setTasks((prev) => [...prev, formattedTask]);
+        if (!normalizedTitleOverride) {
+          setNewTask("");
+        }
         setError("");
+        return formattedTask;
       } else {
         const errorData = await response.json();
         setError(errorData.error || "Error creating task");
+        return null;
       }
     } catch (error) {
       console.error("Error adding task:", error);
       setError("Error creating task");
+      return null;
+    } finally {
+      setAddingTask(false);
     }
   };
 
@@ -277,7 +293,8 @@ export default function Dashboard() {
             title: task.title,
             status: task.status || "Todo",
             assignedTo: "You",
-            description: task.description
+            description: task.description,
+            parent_task_id: task.parent_task_id ?? null
           }
         ]);
         setError("");
@@ -330,7 +347,8 @@ export default function Dashboard() {
           title: task.title,
           status: task.status || "Todo",
           assignedTo: "You",
-          description: task.description
+          description: task.description,
+          parent_task_id: task.parent_task_id ?? null
         });
       }
 
@@ -345,6 +363,10 @@ export default function Dashboard() {
       }
       return false;
     }
+  };
+
+  const handleAddSubtask = async (parentTaskId, subtaskTitle) => {
+    await handleAddTask(subtaskTitle, parentTaskId);
   };
 
   if (isLoading) return <div>Loading...</div>;
@@ -384,11 +406,12 @@ export default function Dashboard() {
                 newTask={newTask}
                 setNewTask={setNewTask}
                 handleAddTask={handleAddTask}
+                disabled={addingTask}
               />
 
               <AISuggestions
-                onAddSuggestion={handleAddSuggestion}
-                onAddSuggestions={handleAddSuggestions}
+                onAddSubtask={handleAddSubtask}
+                onAddTask={handleAddTask}
                 userId={userId}
                 tasks={tasks}
               />
@@ -398,6 +421,7 @@ export default function Dashboard() {
                 onDelete={handleDeleteTask}
                 onStatusChange={handleStatusChange}
                 onAssignChange={handleAssignChange}
+                onAddSubtask={handleAddSubtask}
               />
             </>
           )}

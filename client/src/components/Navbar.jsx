@@ -2,6 +2,9 @@ import { useAuth0 } from "@auth0/auth0-react";
 
 export default function Navbar() {
   const { loginWithRedirect, logout, isAuthenticated, user } = useAuth0();
+  const handleLogout = async () => {
+    await logout({ localOnly: true });
+  };
 
   return (
     <div
@@ -25,20 +28,22 @@ export default function Navbar() {
 
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           {!isAuthenticated ? (
-            <button onClick={() => loginWithRedirect()}>
+            <button
+              onClick={() =>
+                loginWithRedirect({
+                  authorizationParams: {
+                    prompt: "login",
+                  },
+                })
+              }
+            >
               Login
             </button>
           ) : (
             <>
               <span>{user?.email}</span>
               <button
-                onClick={() =>
-                  logout({
-                    logoutParams: {
-                      returnTo: window.location.origin
-                    }
-                  })
-                }
+                onClick={handleLogout}
               >
                 Logout
               </button>

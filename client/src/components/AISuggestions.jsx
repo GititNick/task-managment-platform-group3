@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { apiUrl } from "../api";
 
 const btnBase = {
@@ -10,22 +10,117 @@ const btnBase = {
 };
 
 export default function AISuggestions({
-  onAddSuggestion,
-  onAddSuggestions,
+  onAddSubtask,
+  onAddTask,
   userId,
   tasks = [],
 }) {
-  const [suggestions, setSuggestions] = useState([]);
-  const [selected, setSelected] = useState(() => new Set());
+  const mainTasks = useMemo(
+    () => tasks.filter((task) => task.parent_task_id == null),
+    [tasks]
+  );
+
+  const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
+  const [suggestionsByTask, setSuggestionsByTask] = useState([]);
+  const [selectedSuggestions, setSelectedSuggestions] = useState(() => new Set());
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
+  const [briefDescription, setBriefDescription] = useState("");
 
-  useEffect(() => {
-    setSelected(new Set());
-  }, [suggestions]);
+  const toggleTaskSelected = (taskId) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
 
-  const handleGenerateSuggestions = async () => {
+  const taskCount = mainTasks.length;
+  const selectedTaskCount = selectedTaskIds.size;
+
+  const selectAllTasks = () => {
+    setSelectedTaskIds(new Set(mainTasks.map((task) => task.id)));
+  };
+
+  const deselectAllTasks = () => {
+    setSelectedTaskIds(new Set());
+  };
+
+  const clearSuggestions = () => {
+    setSuggestionsByTask([]);
+    setSelectedSuggestions(new Set());
+    setError("");
+  };
+
+  const handleGenerateSubtasks = async () => {
+    if (!userId) {
+      setError("User not authenticated");
+      return;
+    }
+
+    if (!selectedTaskIds.size) {
+      setError("Select at least one main task first");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setSuggestionsByTask([]);
+    setSelectedSuggestions(new Set());
+
+    try {
+      const selectedTasks = mainTasks.filter((task) => selectedTaskIds.has(task.id));
+
+      const results = [];
+      for (const task of selectedTasks) {
+        const response = await fetch(apiUrl("/api/ai/suggest-tasks"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            mode: "analyze",
+            userId,
+            currentTaskId: task.id,
+            tasks: tasks.map((t) => ({
+              id: t.id,
+              title: t.title,
+              description: t.description,
+              status: t.status,
+            })),
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Failed to generate subtasks for ${task.title}`);
+        }
+
+        const data = await response.json();
+        results.push({
+          taskId: task.id,
+          taskTitle: task.title,
+          suggestions: data.suggestions || [],
+        });
+      }
+
+      setSuggestionsByTask(results.filter((r) => r.suggestions.length > 0));
+    } catch (err) {
+      console.error("Error:", err);
+      setError(err.message || "Error generating subtask suggestions");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGenerateMainTaskFromBrief = async () => {
+    const description = briefDescription.trim();
+    if (!description) {
+      setError("Enter a brief description first");
+      return;
+    }
     if (!userId) {
       setError("User not authenticated");
       return;
@@ -33,100 +128,130 @@ export default function AISuggestions({
 
     setLoading(true);
     setError("");
-    setSuggestions([]);
 
     try {
-      const requestBody = {
-        mode: "analyze",
-        userId,
-        tasks: tasks.map((task) => ({
-          title: task.title,
-          description: task.description,
-          status: task.status,
-        })),
-      };
+      const createdMainTask = await onAddTask(description, null);
+      if (!createdMainTask?.id) {
+        throw new Error("Could not create main task");
+      }
 
       const response = await fetch(apiUrl("/api/ai/suggest-tasks"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          mode: "analyze",
+          userId,
+          currentTaskId: createdMainTask.id,
+          prompt: description,
+          tasks: [
+            ...tasks.map((t) => ({
+              id: t.id,
+              title: t.title,
+              description: t.description,
+              status: t.status,
+            })),
+            {
+              id: createdMainTask.id,
+              title: createdMainTask.title,
+              description: createdMainTask.description || "",
+              status: createdMainTask.status || "pending",
+            },
+          ],
+        }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setSuggestions(data.suggestions || []);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || "Error generating suggestions");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to generate subtask suggestions");
       }
+
+      const data = await response.json();
+      const generated = data.suggestions || [];
+      setSuggestionsByTask([
+        {
+          taskId: createdMainTask.id,
+          taskTitle: createdMainTask.title,
+          suggestions: generated,
+        },
+      ]);
+      setSelectedSuggestions(new Set(generated.map((_, index) => `${createdMainTask.id}:${index}`)));
+      setSelectedTaskIds(new Set([createdMainTask.id]));
+      setBriefDescription("");
     } catch (err) {
       console.error("Error:", err);
-      setError("Error generating suggestions");
+      setError(err.message || "Error generating main task and subtasks");
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleSelected = (index) => {
-    setSelected((prev) => {
+  const suggestionEntries = useMemo(() => {
+    const entries = [];
+    for (const group of suggestionsByTask) {
+      group.suggestions.forEach((title, index) => {
+        entries.push({
+          key: `${group.taskId}:${index}`,
+          taskId: group.taskId,
+          taskTitle: group.taskTitle,
+          title,
+        });
+      });
+    }
+    return entries;
+  }, [suggestionsByTask]);
+
+  const toggleSuggestion = (key) => {
+    setSelectedSuggestions((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
 
-  const selectAll = () => {
-    setSelected(new Set(suggestions.map((_, i) => i)));
+  const selectAllSuggestions = () => {
+    setSelectedSuggestions(new Set(suggestionEntries.map((entry) => entry.key)));
   };
 
-  const deselectAll = () => {
-    setSelected(new Set());
+  const deselectAllSuggestions = () => {
+    setSelectedSuggestions(new Set());
   };
 
-  const clearSuggestionsList = () => {
-    setSuggestions([]);
-    setError("");
-  };
+  const addEntriesAsSubtasks = async (entries) => {
+    if (!entries.length) return;
 
-  const handleAddOne = async (suggestion) => {
     setAdding(true);
+    setError("");
+
     try {
-      const ok = await onAddSuggestion(suggestion);
-      if (ok) clearSuggestionsList();
+      for (const entry of entries) {
+        await onAddSubtask(entry.taskId, entry.title);
+      }
+      clearSuggestions();
+    } catch (err) {
+      console.error("Error adding subtasks:", err);
+      setError("Error adding subtasks");
     } finally {
       setAdding(false);
     }
   };
 
   const handleAddSelected = async () => {
-    const titles = suggestions.filter((_, i) => selected.has(i));
-    if (!titles.length) return;
-    setAdding(true);
-    try {
-      const ok = await onAddSuggestions(titles);
-      if (ok) clearSuggestionsList();
-    } finally {
-      setAdding(false);
-    }
+    const selectedEntries = suggestionEntries.filter((entry) =>
+      selectedSuggestions.has(entry.key)
+    );
+    await addEntriesAsSubtasks(selectedEntries);
   };
 
   const handleAddAll = async () => {
-    if (!suggestions.length) return;
-    setAdding(true);
-    try {
-      const ok = await onAddSuggestions([...suggestions]);
-      if (ok) clearSuggestionsList();
-    } finally {
-      setAdding(false);
-    }
+    await addEntriesAsSubtasks(suggestionEntries);
   };
 
-  const allSelected =
-    suggestions.length > 0 && selected.size === suggestions.length;
-  const someSelected = selected.size > 0;
+  const allTasksSelected = taskCount > 0 && selectedTaskCount === taskCount;
+  const allSuggestionsSelected =
+    suggestionEntries.length > 0 && selectedSuggestions.size === suggestionEntries.length;
 
   return (
     <div
@@ -137,51 +262,118 @@ export default function AISuggestions({
         borderRadius: "8px",
       }}
     >
-      <h3>AI Task Assistant</h3>
+      <h3>AI Task Generator</h3>
       <p style={{ marginBottom: "15px", color: "#666" }}>
-        Analyze your current tasks and get AI-powered suggestions for
-        improvements and related tasks across any domain.
+        Select the main tasks you want help with to generate subtask suggestions for those tasks.
       </p>
 
-      <button
-        type="button"
-        onClick={handleGenerateSuggestions}
-        disabled={loading || tasks.length === 0}
+      <div
         style={{
-          ...btnBase,
-          backgroundColor: loading ? "#ccc" : "#007bff",
-          cursor: loading || tasks.length === 0 ? "not-allowed" : "pointer",
-          marginBottom: "10px",
+          marginBottom: "16px",
+          padding: "12px",
+          border: "1px solid #eee",
+          borderRadius: "6px",
+          backgroundColor: "#fafafa",
         }}
       >
-        {loading ? "Analyzing..." : "Analyze Tasks & Get Suggestions"}
-      </button>
-
-      {tasks.length === 0 && (
-        <p style={{ color: "#888", fontSize: "14px" }}>
-          Add some tasks first to get AI suggestions.
+        <h4 style={{ marginTop: 0, marginBottom: "8px" }}>
+          Generate New Main Task
+        </h4>
+        <p style={{ marginTop: 0, marginBottom: "10px", color: "#666", fontSize: "14px" }}>
+          Enter a brief description. We will create a new main task and generate subtask suggestions for it.
         </p>
-      )}
-
-      {error && (
-        <div style={{ color: "red", marginBottom: "10px" }}>{error}</div>
-      )}
-
-      {suggestions.length > 0 && (
-        <div>
-          <div
+        <div style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="text"
+            value={briefDescription}
+            onChange={(e) => setBriefDescription(e.target.value)}
+            placeholder="Example: Plan onboarding flow for new users"
+            disabled={loading || adding}
             style={{
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              gap: "8px",
-              marginBottom: "12px",
+              flex: 1,
+              padding: "8px 10px",
+              borderRadius: "6px",
+              border: "1px solid #ccc",
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleGenerateMainTaskFromBrief}
+            disabled={loading || adding || !briefDescription.trim()}
+            style={{
+              ...btnBase,
+              backgroundColor: loading ? "#8bb7ff" : "#007bff",
+              cursor:
+                loading || adding || !briefDescription.trim() ? "not-allowed" : "pointer",
             }}
           >
-            <h4 style={{ margin: 0, marginRight: "8px" }}>Suggested Tasks:</h4>
+            {loading ? "Generating..." : "Generate Main Task"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: "12px" }}>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "8px" }}>
+          <button
+            type="button"
+            onClick={allTasksSelected ? deselectAllTasks : selectAllTasks}
+            disabled={loading || adding || taskCount === 0}
+            style={{
+              ...btnBase,
+              backgroundColor: "#6c757d",
+              cursor: loading || adding || taskCount === 0 ? "not-allowed" : "pointer",
+              opacity: loading || adding || taskCount === 0 ? 0.7 : 1,
+            }}
+          >
+            {allTasksSelected ? "Deselect tasks" : "Select all tasks"}
+          </button>
+          <button
+            type="button"
+            onClick={handleGenerateSubtasks}
+            disabled={loading || adding || selectedTaskCount === 0}
+            style={{
+              ...btnBase,
+              backgroundColor: loading ? "#8bb7ff" : "#007bff",
+              cursor:
+                loading || adding || selectedTaskCount === 0 ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading
+              ? "Generating..."
+              : `Generate subtasks for selected (${selectedTaskCount})`}
+          </button>
+        </div>
+
+        {taskCount === 0 ? (
+          <p style={{ color: "#888", fontSize: "14px" }}>
+            Add at least one main task to generate subtasks.
+          </p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {mainTasks.map((task) => (
+              <li key={task.id} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                <input
+                  type="checkbox"
+                  checked={selectedTaskIds.has(task.id)}
+                  onChange={() => toggleTaskSelected(task.id)}
+                  disabled={loading || adding}
+                  aria-label={`Select task: ${task.title}`}
+                />
+                <span>{task.title}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {error && <div style={{ color: "red", marginBottom: "10px" }}>{error}</div>}
+
+      {suggestionEntries.length > 0 && (
+        <div>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
             <button
               type="button"
-              onClick={allSelected ? deselectAll : selectAll}
+              onClick={allSuggestionsSelected ? deselectAllSuggestions : selectAllSuggestions}
               disabled={adding}
               style={{
                 ...btnBase,
@@ -190,20 +382,21 @@ export default function AISuggestions({
                 opacity: adding ? 0.7 : 1,
               }}
             >
-              {allSelected ? "Deselect all" : "Select all"}
+              {allSuggestionsSelected ? "Deselect suggestions" : "Select all suggestions"}
             </button>
             <button
               type="button"
               onClick={handleAddSelected}
-              disabled={adding || !someSelected}
+              disabled={adding || selectedSuggestions.size === 0}
               style={{
                 ...btnBase,
                 backgroundColor:
-                  adding || !someSelected ? "#94d3a2" : "#28a745",
-                cursor: adding || !someSelected ? "not-allowed" : "pointer",
+                  adding || selectedSuggestions.size === 0 ? "#94d3a2" : "#28a745",
+                cursor:
+                  adding || selectedSuggestions.size === 0 ? "not-allowed" : "pointer",
               }}
             >
-              Add selected ({selected.size})
+              Add selected subtasks ({selectedSuggestions.size})
             </button>
             <button
               type="button"
@@ -215,15 +408,16 @@ export default function AISuggestions({
                 cursor: adding ? "not-allowed" : "pointer",
               }}
             >
-              Add all ({suggestions.length})
+              Add all subtasks ({suggestionEntries.length})
             </button>
           </div>
+
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {suggestions.map((suggestion, index) => (
+            {suggestionEntries.map((entry) => (
               <li
-                key={index}
+                key={entry.key}
                 style={{
-                  marginBottom: "10px",
+                  marginBottom: "8px",
                   display: "flex",
                   alignItems: "center",
                   gap: "10px",
@@ -234,25 +428,15 @@ export default function AISuggestions({
               >
                 <input
                   type="checkbox"
-                  checked={selected.has(index)}
-                  onChange={() => toggleSelected(index)}
+                  checked={selectedSuggestions.has(entry.key)}
+                  onChange={() => toggleSuggestion(entry.key)}
                   disabled={adding}
-                  aria-label={`Select suggestion: ${suggestion}`}
+                  aria-label={`Select suggestion: ${entry.title}`}
                 />
-                <span style={{ flex: 1 }}>{suggestion}</span>
-                <button
-                  type="button"
-                  onClick={() => handleAddOne(suggestion)}
-                  disabled={adding}
-                  style={{
-                    ...btnBase,
-                    backgroundColor: adding ? "#94d3a2" : "#28a745",
-                    cursor: adding ? "not-allowed" : "pointer",
-                    flexShrink: 0,
-                  }}
-                >
-                  Add
-                </button>
+                <span style={{ color: "#555", minWidth: "180px", fontSize: "13px" }}>
+                  {entry.taskTitle}
+                </span>
+                <span style={{ flex: 1 }}>{entry.title}</span>
               </li>
             ))}
           </ul>

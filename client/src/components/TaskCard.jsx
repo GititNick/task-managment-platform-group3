@@ -11,7 +11,7 @@ export default function TaskCard({
         padding: "15px",
         marginBottom: "10px",
         borderRadius: "10px",
-        backgroundColor: "#ffffff"
+        backgroundColor: "#111111"
       }}
     >
       <h4>{task.title}</h4>

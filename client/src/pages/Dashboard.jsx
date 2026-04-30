@@ -14,7 +14,9 @@ export default function Dashboard() {
   const [error, setError] = useState("");
 
   // UI ADDITION: background color picker
-  const [bgColor, setBgColor] = useState("#0f172a");
+  const [bgColor, setBgColor] = useState(() => {
+  return localStorage.getItem("dashboardBgColor") || "#0f172a";
+});
 
   // search + filter
   const [searchTerm, setSearchTerm] = useState("");
@@ -34,13 +36,8 @@ export default function Dashboard() {
 
   // Load saved background color for this user
   useEffect(() => {
-    if (user?.sub) {
-      const savedColor = localStorage.getItem(`dashboardBgColor:${user.sub}`);
-      if (savedColor) {
-        setBgColor(savedColor);
-      }
-    }
-  }, [user?.sub]);
+  localStorage.setItem("dashboardBgColor", bgColor);
+}, [bgColor]);
 
   // Save background color for this user whenever it changes
   useEffect(() => {

@@ -19,26 +19,7 @@ function normalizeTask(task) {
     assignedTo: "You",
     description: task.description,
     due_date: task.due_date,
-    parent_task_id: task.parent_task_id ?? null,
   };
-}
-
-function buildTaskHierarchy(tasks) {
-  const taskMap = new Map(
-    tasks.map((task) => [task.id, { ...task, subtasks: [] }])
-  );
-  const mainTasks = [];
-
-  taskMap.forEach((task) => {
-    if (task.parent_task_id && taskMap.has(task.parent_task_id)) {
-      taskMap.get(task.parent_task_id).subtasks.push(task);
-      return;
-    }
-
-    mainTasks.push(task);
-  });
-
-  return mainTasks;
 }
 
 export default function Dashboard() {
@@ -49,12 +30,10 @@ export default function Dashboard() {
   const [tasksLoading, setTasksLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // UI ADDITION: background color picker
   const [bgColor, setBgColor] = useState(() => {
-  return localStorage.getItem("dashboardBgColor") || "#0f172a";
-});
+    return localStorage.getItem("dashboardBgColor") || "#0f172a";
+  });
 
-  // search + filter
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("none");
 
@@ -70,12 +49,10 @@ export default function Dashboard() {
     }
   }, [userId]);
 
-  // Load saved background color for this user
   useEffect(() => {
-  localStorage.setItem("dashboardBgColor", bgColor);
-}, [bgColor]);
+    localStorage.setItem("dashboardBgColor", bgColor);
+  }, [bgColor]);
 
-  // Save background color for this user whenever it changes
   useEffect(() => {
     if (user?.sub) {
       localStorage.setItem(`dashboardBgColor:${user.sub}`, bgColor);
@@ -135,10 +112,7 @@ export default function Dashboard() {
         const data = await response.json();
         const task = data.task;
 
-        setTasks([
-          ...tasks,
-          normalizeTask(task),
-        ]);
+        setTasks([...tasks, normalizeTask(task)]);
 
         setNewTask("");
         setError("");
@@ -197,51 +171,13 @@ export default function Dashboard() {
     );
   };
 
-  const handleAddSubtask = async (parentTaskId, title) => {
-    if (!userId || !title.trim()) {
-      return;
-    }
-
-    try {
-      const response = await fetch(apiUrl("/api/tasks"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          parent_task_id: parentTaskId,
-          title: title.trim(),
-          description: "",
-          status: "pending",
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setTasks((prev) => [...prev, normalizeTask(data.task)]);
-        setError("");
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || "Error creating subtask");
-      }
-    } catch (error) {
-      setError("Error creating subtask");
-    }
-  };
-
-  const handleAddSuggestion = async (suggestionInput, options = {}) => {
+  const handleAddSuggestion = async (suggestionInput) => {
     if (!userId) {
       setError("User ID not available. Please refresh the page.");
       return;
     }
 
     try {
-      const parentTaskIds = Array.isArray(options.parentTaskIds)
-        ? options.parentTaskIds
-            .map((id) => Number(id))
-            .filter((id) => Number.isFinite(id))
-        : [];
       const suggestions = Array.isArray(suggestionInput)
         ? suggestionInput
         : [suggestionInput];
@@ -253,93 +189,19 @@ export default function Dashboard() {
         return;
       }
 
-      if (options.createMainTaskWithSubtasks && options.mainTaskTitle?.trim()) {
-        const mainTaskResponse = await fetch(apiUrl("/api/tasks"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            user_id: userId,
-            title: options.mainTaskTitle.trim(),
-            description: "",
-            status: "pending",
-          }),
-        });
-
-        if (!mainTaskResponse.ok) {
-          const errorData = await mainTaskResponse.json();
-          setError(errorData.error || "Error creating main task");
-          return;
-        }
-
-        const mainTaskData = await mainTaskResponse.json();
-        const mainTask = normalizeTask(mainTaskData.task);
-
-        const subtaskResponses = await Promise.all(
-          validSuggestions.map((suggestion) =>
-            fetch(apiUrl("/api/tasks"), {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                user_id: userId,
-                parent_task_id: mainTask.id,
-                title: suggestion,
-                description: "",
-                status: "pending",
-              }),
-            })
-          )
-        );
-
-        const failedSubtaskResponse = subtaskResponses.find(
-          (response) => !response.ok
-        );
-
-        if (failedSubtaskResponse) {
-          const errorData = await failedSubtaskResponse.json();
-          setError(errorData.error || "Error creating subtasks");
-          return;
-        }
-
-        const subtaskData = await Promise.all(
-          subtaskResponses.map((response) => response.json())
-        );
-        const createdSubtasks = subtaskData.map(({ task }) => normalizeTask(task));
-
-        setTasks((prev) => [...prev, mainTask, ...createdSubtasks]);
-        setError("");
-        return;
-      }
-
-      const taskPayloads =
-        options.asSubtasks && parentTaskIds.length > 0
-          ? parentTaskIds.flatMap((parentTaskId) =>
-              validSuggestions.map((suggestion) => ({
-                user_id: userId,
-                parent_task_id: parentTaskId,
-                title: suggestion,
-                description: "",
-                status: "pending",
-              }))
-            )
-          : validSuggestions.map((suggestion) => ({
-              user_id: userId,
-              title: suggestion,
-              description: "",
-              status: "pending",
-            }));
-
       const responses = await Promise.all(
-        taskPayloads.map((payload) =>
+        validSuggestions.map((suggestion) =>
           fetch(apiUrl("/api/tasks"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({
+              user_id: userId,
+              title: suggestion,
+              description: "",
+              status: "pending",
+            }),
           })
         )
       );
@@ -375,8 +237,6 @@ export default function Dashboard() {
       (a, b) => (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99)
     );
   }
-
-  const hierarchicalTasks = buildTaskHierarchy(filteredTasks);
 
   if (isLoading) return <div>Loading...</div>;
 
@@ -446,15 +306,14 @@ export default function Dashboard() {
                 <AISuggestions
                   onAddSuggestion={handleAddSuggestion}
                   userId={userId}
-                  tasks={tasks.filter((task) => !task.parent_task_id)}
+                  tasks={tasks}
                 />
 
                 <TaskList
-                  tasks={hierarchicalTasks}
+                  tasks={filteredTasks}
                   onDelete={handleDeleteTask}
                   onStatusChange={handleStatusChange}
                   onAssignChange={handleAssignChange}
-                  onAddSubtask={handleAddSubtask}
                 />
               </>
             )}

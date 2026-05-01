@@ -1,4 +1,9 @@
-export default function TaskCard({ task, onDelete, onStatusChange, onAssignChange }) {
+export default function TaskCard({
+  task,
+  onDelete,
+  onStatusChange,
+  onAssignChange
+}) {
   return (
     <div
       style={{
@@ -9,13 +14,15 @@ export default function TaskCard({ task, onDelete, onStatusChange, onAssignChang
         backgroundColor: "#111111"
       }}
     >
-      <h4 style={{ marginTop: 0 }}>{task.title}</h4>
+      <h4>{task.title}</h4>
 
       <div style={{ marginBottom: "10px" }}>
         <label>Status: </label>
         <select
           value={task.status}
-          onChange={(e) => onStatusChange(task.id, e.target.value)}
+          onChange={(e) =>
+            onStatusChange(task.id, e.target.value)
+          }
         >
           <option value="Todo">Todo</option>
           <option value="In Progress">In Progress</option>
@@ -27,7 +34,9 @@ export default function TaskCard({ task, onDelete, onStatusChange, onAssignChang
         <label>Assign: </label>
         <select
           value={task.assignedTo}
-          onChange={(e) => onAssignChange(task.id, e.target.value)}
+          onChange={(e) =>
+            onAssignChange(task.id, e.target.value)
+          }
         >
           <option value="You">You</option>
           <option value="Teammate">Teammate</option>

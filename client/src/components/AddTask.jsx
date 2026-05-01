@@ -7,7 +7,7 @@ export default function AddTask({
     <div style={{ margin: "20px 0", display: "flex", gap: "10px" }}>
       <input
         type="text"
-        placeholder="Enter a main task..."
+        placeholder="Enter new task..."
         value={newTask}
         onChange={(e) => setNewTask(e.target.value)}
         style={{
@@ -28,7 +28,7 @@ export default function AddTask({
           borderRadius: "6px"
         }}
       >
-        Add Main Task
+        Add Task
       </button>
     </div>
   );

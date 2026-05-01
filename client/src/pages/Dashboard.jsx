@@ -5,23 +5,6 @@ import AddTask from "../components/AddTask";
 import AISuggestions from "../components/AISuggestions";
 import { apiUrl } from "../api";
 
-function normalizeTask(task) {
-  const statusMap = {
-    pending: "Todo",
-    "in-progress": "In Progress",
-    completed: "Done",
-  };
-
-  return {
-    id: task.id,
-    title: task.title,
-    status: statusMap[task.status] || task.status || "Todo",
-    assignedTo: "You",
-    description: task.description,
-    due_date: task.due_date,
-  };
-}
-
 export default function Dashboard() {
   const { isAuthenticated, user, isLoading } = useAuth0();
   const [tasks, setTasks] = useState([]);
@@ -30,10 +13,12 @@ export default function Dashboard() {
   const [tasksLoading, setTasksLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // UI ADDITION: background color picker
   const [bgColor, setBgColor] = useState(() => {
-    return localStorage.getItem("dashboardBgColor") || "#0f172a";
-  });
+  return localStorage.getItem("dashboardBgColor") || "#0f172a";
+});
 
+  // search + filter
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("none");
 
@@ -49,10 +34,12 @@ export default function Dashboard() {
     }
   }, [userId]);
 
+  // Load saved background color for this user
   useEffect(() => {
-    localStorage.setItem("dashboardBgColor", bgColor);
-  }, [bgColor]);
+  localStorage.setItem("dashboardBgColor", bgColor);
+}, [bgColor]);
 
+  // Save background color for this user whenever it changes
   useEffect(() => {
     if (user?.sub) {
       localStorage.setItem(`dashboardBgColor:${user.sub}`, bgColor);
@@ -79,7 +66,14 @@ export default function Dashboard() {
       const response = await fetch(apiUrl(`/api/tasks/user/${userId}`));
       if (response.ok) {
         const data = await response.json();
-        const formattedTasks = data.tasks.map(normalizeTask);
+        const formattedTasks = data.tasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          status: task.status || "Todo",
+          assignedTo: "You",
+          description: task.description,
+          due_date: task.due_date,
+        }));
         setTasks(formattedTasks);
       }
     } catch (error) {
@@ -112,7 +106,16 @@ export default function Dashboard() {
         const data = await response.json();
         const task = data.task;
 
-        setTasks([...tasks, normalizeTask(task)]);
+        setTasks([
+          ...tasks,
+          {
+            id: task.id,
+            title: task.title,
+            status: task.status || "Todo",
+            assignedTo: "You",
+            description: task.description,
+          },
+        ]);
 
         setNewTask("");
         setError("");
@@ -171,50 +174,43 @@ export default function Dashboard() {
     );
   };
 
-  const handleAddSuggestion = async (suggestionInput) => {
+  const handleAddSuggestion = async (suggestion) => {
     if (!userId) {
       setError("User ID not available. Please refresh the page.");
       return;
     }
 
     try {
-      const suggestions = Array.isArray(suggestionInput)
-        ? suggestionInput
-        : [suggestionInput];
-      const validSuggestions = suggestions.filter(
-        (item) => typeof item === "string" && item.trim() !== ""
-      );
+      const response = await fetch(apiUrl("/api/tasks"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          title: suggestion,
+          description: "",
+          status: "pending",
+        }),
+      });
 
-      if (validSuggestions.length === 0) {
-        return;
-      }
+      if (response.ok) {
+        const data = await response.json();
+        const task = data.task;
 
-      const responses = await Promise.all(
-        validSuggestions.map((suggestion) =>
-          fetch(apiUrl("/api/tasks"), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              user_id: userId,
-              title: suggestion,
-              description: "",
-              status: "pending",
-            }),
-          })
-        )
-      );
-
-      const failedResponse = responses.find((response) => !response.ok);
-      if (!failedResponse) {
-        const data = await Promise.all(responses.map((response) => response.json()));
-        const createdTasks = data.map(({ task }) => normalizeTask(task));
-
-        setTasks((prev) => [...prev, ...createdTasks]);
+        setTasks([
+          ...tasks,
+          {
+            id: task.id,
+            title: task.title,
+            status: task.status || "Todo",
+            assignedTo: "You",
+            description: task.description,
+          },
+        ]);
         setError("");
       } else {
-        const errorData = await failedResponse.json();
+        const errorData = await response.json();
         setError(errorData.error || "Error creating task");
       }
     } catch (error) {
@@ -232,7 +228,7 @@ export default function Dashboard() {
   }
 
   if (filterType === "status") {
-    const statusOrder = { Todo: 1, "In Progress": 2, Done: 3 };
+    const statusOrder = { pending: 1, Todo: 2, completed: 3 };
     filteredTasks.sort(
       (a, b) => (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99)
     );

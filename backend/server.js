@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const HF_TOKEN = process.env.HF_TOKEN || process.env.HUGGINGFACE_API_KEY;
+const HF_TOKEN = process.env.HF_TOKEN;
 const HUGGINGFACE_MODEL =
   process.env.HUGGINGFACE_MODEL || 'Qwen/Qwen2.5-7B-Instruct';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -348,16 +348,8 @@ app.post('/api/tasks', async (req, res) => {
     }
 
     const result = await client.query(
-      `INSERT INTO tasks (user_id, title, description, status, due_date)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [
-        user_id,
-        title,
-        description || '',
-        status || 'pending',
-        due_date || null,
-      ]
+      'INSERT INTO tasks (user_id, title, description, status, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [user_id, title, description || '', status || 'pending', due_date || null]
     );
 
     res.status(201).json({
@@ -377,10 +369,7 @@ app.get('/api/tasks/user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const result = await client.query(
-      `SELECT *
-       FROM tasks
-       WHERE user_id = $1
-       ORDER BY created_at DESC`,
+      'SELECT * FROM tasks WHERE user_id = $1 ORDER BY created_at DESC',
       [userId]
     );
 
@@ -425,14 +414,7 @@ app.put('/api/tasks/:id', async (req, res) => {
     const { title, description, status, due_date } = req.body;
 
     const result = await client.query(
-      `UPDATE tasks
-       SET title = COALESCE($1, title),
-           description = COALESCE($2, description),
-           status = COALESCE($3, status),
-           due_date = COALESCE($4, due_date),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5
-       RETURNING *`,
+      'UPDATE tasks SET title = COALESCE($1, title), description = COALESCE($2, description), status = COALESCE($3, status), due_date = COALESCE($4, due_date), updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *',
       [title, description, status, due_date, id]
     );
 
@@ -732,30 +714,6 @@ Avoid generic advice like "break it down" or "set a deadline" unless there is no
 Return only short actionable task suggestions, one per line.`;
 }
 
-function buildCombinedTaskFromSelection(selectedTasks) {
-  const combinedTitle = selectedTasks.map((task) => task.title || 'Untitled task').join(' + ');
-  const combinedDescription = selectedTasks
-    .map((task) => task.description || '')
-    .filter(Boolean)
-    .join(' ');
-
-  const normalizedStatuses = selectedTasks.map((task) => (task.status || '').toLowerCase());
-  let combinedStatus = 'pending';
-
-  if (normalizedStatuses.some((status) => status.includes('progress'))) {
-    combinedStatus = 'in-progress';
-  } else if (normalizedStatuses.every((status) => status.includes('done') || status.includes('complete'))) {
-    combinedStatus = 'completed';
-  }
-
-  return {
-    id: selectedTasks.map((task) => task.id).join('-'),
-    title: combinedTitle,
-    description: combinedDescription,
-    status: combinedStatus,
-  };
-}
-
 function buildPromptModePrompt(prompt) {
   return `You are a task planning assistant.
 
@@ -808,34 +766,11 @@ async function generateHostedSuggestions(prompt) {
   return response.choices?.[0]?.message?.content || '';
 }
 
-async function analyzeTaskSuggestions(currentTask, candidateRelatedTasks) {
-  const relatedTasks = getMostRelatedTasks(currentTask, candidateRelatedTasks, 5);
-  let suggestions = [];
-
-  try {
-    const aiPrompt = buildAnalyzePrompt(currentTask, relatedTasks);
-    const generatedText = await generateHostedSuggestions(aiPrompt);
-    suggestions = parseSuggestionsFromModel(generatedText);
-  } catch (error) {
-    console.error('AI analyze mode failed:', error.message);
-  }
-
-  if (suggestions.length === 0) {
-    suggestions = fallbackNextStepSuggestions(currentTask, relatedTasks);
-  }
-
-  return {
-    currentTask,
-    relatedTasks,
-    suggestions,
-  };
-}
-
 // ===== AI ENDPOINT =====
 
 app.post('/api/ai/suggest-tasks', async (req, res) => {
   try {
-    const { mode, prompt, userId, currentTaskId, currentTaskIds, tasks } = req.body;
+    const { mode, prompt, userId, currentTaskId, tasks } = req.body;
 
     if (!userId) {
       return res.status(400).json({ error: 'userId is required' });
@@ -860,79 +795,51 @@ app.post('/api/ai/suggest-tasks', async (req, res) => {
         return res.status(404).json({ error: 'No tasks found for analysis' });
       }
 
-      const requestedTaskIds = Array.isArray(currentTaskIds)
-        ? currentTaskIds.map((id) => String(id).trim())
-        : currentTaskId
-          ? [String(currentTaskId).trim()]
-          : [];
-      let tasksToAnalyze = [];
+      let currentTask = null;
 
-      if (requestedTaskIds.length > 0) {
-        tasksToAnalyze = requestedTaskIds
-          .map((requestedId) =>
-            userTasks.find((task) => String(task.id).trim() === requestedId)
-          )
-          .filter(Boolean);
-
-        if (tasksToAnalyze.length === 0) {
-          return res.status(400).json({
-            error: 'Selected tasks were not found. Please reselect and try again.',
-          });
-        }
+      if (currentTaskId) {
+        currentTask =
+          userTasks.find((task) => String(task.id) === String(currentTaskId)) || null;
       }
 
-      if (tasksToAnalyze.length === 0 && prompt?.trim()) {
-        tasksToAnalyze = [
-          {
-            id: 'prompt-task',
-            title: prompt.trim(),
-            description: '',
-            status: 'pending',
-          },
-        ];
+      if (!currentTask && prompt?.trim()) {
+        currentTask = {
+          id: 'prompt-task',
+          title: prompt.trim(),
+          description: '',
+          status: 'pending',
+        };
       }
 
-      if (tasksToAnalyze.length === 0) {
-        const fallbackTask =
+      if (!currentTask) {
+        currentTask =
           userTasks.find((task) => task.status === 'in-progress') ||
           userTasks.find((task) => task.status === 'pending') ||
           userTasks[0];
-
-        if (fallbackTask) {
-          tasksToAnalyze = [fallbackTask];
-        }
       }
 
-      const suggestionsByTask = [];
+      const relatedTasks = getMostRelatedTasks(currentTask, userTasks, 5);
 
-      for (const taskToAnalyze of tasksToAnalyze) {
-        const candidateRelatedTasks = userTasks.filter(
-          (task) => String(task.id) !== String(taskToAnalyze.id)
-        );
+      let suggestions = [];
 
-        const analysis = await analyzeTaskSuggestions(taskToAnalyze, candidateRelatedTasks);
-        suggestionsByTask.push(analysis);
+      try {
+        const aiPrompt = buildAnalyzePrompt(currentTask, relatedTasks);
+        const generatedText = await generateHostedSuggestions(aiPrompt);
+        suggestions = parseSuggestionsFromModel(generatedText);
+      } catch (error) {
+        console.error('AI analyze mode failed:', error.message);
       }
 
-      const primaryTaskId = requestedTaskIds[0];
-      const primaryResult =
-        (primaryTaskId
-          ? suggestionsByTask.find(
-              (result) => String(result.currentTask?.id).trim() === primaryTaskId
-            )
-          : suggestionsByTask[0]) || {
-        currentTask: null,
-        relatedTasks: [],
-        suggestions: [],
-      };
+      if (suggestions.length === 0) {
+        suggestions = fallbackNextStepSuggestions(currentTask, relatedTasks);
+      }
 
       return res.json({
         status: 'Suggestions generated',
         mode: 'analyze',
-        currentTask: primaryResult.currentTask,
-        relatedTasks: primaryResult.relatedTasks,
-        suggestions: primaryResult.suggestions,
-        suggestionsByTask,
+        currentTask,
+        relatedTasks,
+        suggestions,
       });
     }
 

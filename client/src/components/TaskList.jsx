@@ -1,6 +1,11 @@
 import TaskCard from "./TaskCard";
 
-export default function TaskList({ tasks, onDelete, onStatusChange, onAssignChange }) {
+export default function TaskList({
+  tasks,
+  onDelete,
+  onStatusChange,
+  onAssignChange
+}) {
   return (
     <div>
       <h3>Your Tasks</h3>
@@ -8,7 +13,7 @@ export default function TaskList({ tasks, onDelete, onStatusChange, onAssignChan
       {tasks.length === 0 ? (
         <p>No tasks yet</p>
       ) : (
-        tasks.map((task) => (
+        tasks.map(task => (
           <TaskCard
             key={task.id}
             task={task}

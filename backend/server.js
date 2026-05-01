@@ -49,26 +49,9 @@ client.connect((err) => {
     console.error('Database connection error:', err);
   } else {
     console.log('Connected to Neon PostgreSQL');
-    ensureTaskHierarchySchema()
-      .then(() => syncAllAuth0Users())
-      .catch((schemaError) => {
-        console.error('Error preparing task hierarchy schema:', schemaError.message);
-        syncAllAuth0Users();
-      });
+    syncAllAuth0Users();
   }
 });
-
-async function ensureTaskHierarchySchema() {
-  await client.query(`
-    ALTER TABLE tasks
-    ADD COLUMN IF NOT EXISTS parent_task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE
-  `);
-
-  await client.query(`
-    CREATE INDEX IF NOT EXISTS idx_tasks_parent_task_id
-    ON tasks(parent_task_id)
-  `);
-}
 
 // Sync all Auth0 users to Neon (runs on startup)
 async function syncAllAuth0Users() {
@@ -358,34 +341,18 @@ app.get('/api/users', async (req, res) => {
 // Create a new task
 app.post('/api/tasks', async (req, res) => {
   try {
-    const { user_id, parent_task_id, title, description, status, due_date } = req.body;
+    const { user_id, title, description, status, due_date } = req.body;
 
     if (!user_id || !title) {
       return res.status(400).json({ error: 'user_id and title are required' });
     }
 
-    if (parent_task_id) {
-      const parentTaskResult = await client.query(
-        'SELECT id, user_id FROM tasks WHERE id = $1',
-        [parent_task_id]
-      );
-
-      if (parentTaskResult.rows.length === 0) {
-        return res.status(404).json({ error: 'Parent task not found' });
-      }
-
-      if (String(parentTaskResult.rows[0].user_id) !== String(user_id)) {
-        return res.status(400).json({ error: 'Parent task must belong to the same user' });
-      }
-    }
-
     const result = await client.query(
-      `INSERT INTO tasks (user_id, parent_task_id, title, description, status, due_date)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO tasks (user_id, title, description, status, due_date)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
       [
         user_id,
-        parent_task_id || null,
         title,
         description || '',
         status || 'pending',
@@ -413,9 +380,7 @@ app.get('/api/tasks/user/:userId', async (req, res) => {
       `SELECT *
        FROM tasks
        WHERE user_id = $1
-       ORDER BY
-         CASE WHEN parent_task_id IS NULL THEN 0 ELSE 1 END,
-         created_at DESC`,
+       ORDER BY created_at DESC`,
       [userId]
     );
 
@@ -457,44 +422,7 @@ app.get('/api/tasks/:id', async (req, res) => {
 app.put('/api/tasks/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, status, due_date, parent_task_id } = req.body;
-
-    if (parent_task_id !== undefined) {
-      if (String(parent_task_id) === String(id)) {
-        return res.status(400).json({ error: 'A task cannot be its own parent' });
-      }
-
-      if (parent_task_id !== null) {
-        const currentTaskResult = await client.query(
-          'SELECT id, user_id FROM tasks WHERE id = $1',
-          [id]
-        );
-
-        if (currentTaskResult.rows.length === 0) {
-          return res.status(404).json({ error: 'Task not found' });
-        }
-
-        const parentTaskResult = await client.query(
-          'SELECT id, user_id, parent_task_id FROM tasks WHERE id = $1',
-          [parent_task_id]
-        );
-
-        if (parentTaskResult.rows.length === 0) {
-          return res.status(404).json({ error: 'Parent task not found' });
-        }
-
-        if (
-          String(parentTaskResult.rows[0].user_id) !==
-          String(currentTaskResult.rows[0].user_id)
-        ) {
-          return res.status(400).json({ error: 'Parent task must belong to the same user' });
-        }
-
-        if (String(parentTaskResult.rows[0].parent_task_id) === String(id)) {
-          return res.status(400).json({ error: 'Nested subtask loops are not allowed' });
-        }
-      }
-    }
+    const { title, description, status, due_date } = req.body;
 
     const result = await client.query(
       `UPDATE tasks
@@ -502,11 +430,10 @@ app.put('/api/tasks/:id', async (req, res) => {
            description = COALESCE($2, description),
            status = COALESCE($3, status),
            due_date = COALESCE($4, due_date),
-           parent_task_id = COALESCE($5, parent_task_id),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $6
+       WHERE id = $5
        RETURNING *`,
-      [title, description, status, due_date, parent_task_id, id]
+      [title, description, status, due_date, id]
     );
 
     if (result.rows.length === 0) {
@@ -840,21 +767,6 @@ Avoid generic advice unless there is no better option.
 Return only short actionable task suggestions, one per line.`;
 }
 
-function buildPromptModePlanPrompt(prompt) {
-  return `You are a task planning assistant.
-
-User goal:
-${prompt}
-
-Create one clear main task and 3 to 5 concrete subtasks for that goal.
-Return exactly in this format:
-Main task: <short main task title>
-Subtasks:
-- <subtask 1>
-- <subtask 2>
-- <subtask 3>`;
-}
-
 function parseSuggestionsFromModel(text) {
   if (!text) return [];
 
@@ -894,40 +806,6 @@ async function generateHostedSuggestions(prompt) {
   });
 
   return response.choices?.[0]?.message?.content || '';
-}
-
-function parsePromptPlanFromModel(text, fallbackPrompt) {
-  if (!text) {
-    return {
-      title: fallbackPrompt.trim(),
-      subtasks: [],
-    };
-  }
-
-  const lines = text
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const mainTaskLine = lines.find((line) => /^main task:/i.test(line));
-  const title = mainTaskLine
-    ? mainTaskLine.replace(/^main task:\s*/i, '').trim()
-    : fallbackPrompt.trim();
-
-  const subtasks = Array.from(
-    new Set(
-      lines
-        .filter((line) => /^[-*•]\s+/.test(line))
-        .map((line) => line.replace(/^[-*•]\s+/, '').trim())
-        .filter((line) => line.length > 3 && line.length < 120)
-    )
-  ).slice(0, 5);
-
-  return {
-    title: title || fallbackPrompt.trim(),
-    subtasks,
-  };
 }
 
 async function analyzeTaskSuggestions(currentTask, candidateRelatedTasks) {
@@ -1049,16 +927,11 @@ app.post('/api/ai/suggest-tasks', async (req, res) => {
     }
 
     let suggestions = [];
-    let mainTaskSuggestion = {
-      title: prompt.trim(),
-      subtasks: [],
-    };
 
     try {
-      const planPrompt = buildPromptModePlanPrompt(prompt.trim());
-      const generatedPlanText = await generateHostedSuggestions(planPrompt);
-      mainTaskSuggestion = parsePromptPlanFromModel(generatedPlanText, prompt.trim());
-      suggestions = mainTaskSuggestion.subtasks;
+      const aiPrompt = buildPromptModePrompt(prompt.trim());
+      const generatedText = await generateHostedSuggestions(aiPrompt);
+      suggestions = parseSuggestionsFromModel(generatedText);
     } catch (error) {
       console.error('AI prompt mode failed:', error.message);
     }
@@ -1073,17 +946,12 @@ app.post('/api/ai/suggest-tasks', async (req, res) => {
         },
         []
       );
-      mainTaskSuggestion = {
-        title: prompt.trim(),
-        subtasks: suggestions,
-      };
     }
 
     res.json({
       status: 'Suggestions generated',
       mode: 'prompt',
       suggestions,
-      mainTaskSuggestion,
     });
   } catch (error) {
     console.error('AI generation error:', error);

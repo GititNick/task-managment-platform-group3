@@ -861,16 +861,24 @@ app.post('/api/ai/suggest-tasks', async (req, res) => {
       }
 
       const requestedTaskIds = Array.isArray(currentTaskIds)
-        ? currentTaskIds.map((id) => String(id))
+        ? currentTaskIds.map((id) => String(id).trim())
         : currentTaskId
-          ? [String(currentTaskId)]
+          ? [String(currentTaskId).trim()]
           : [];
       let tasksToAnalyze = [];
 
       if (requestedTaskIds.length > 0) {
-        tasksToAnalyze = userTasks.filter((task) =>
-          requestedTaskIds.includes(String(task.id))
-        );
+        tasksToAnalyze = requestedTaskIds
+          .map((requestedId) =>
+            userTasks.find((task) => String(task.id).trim() === requestedId)
+          )
+          .filter(Boolean);
+
+        if (tasksToAnalyze.length === 0) {
+          return res.status(400).json({
+            error: 'Selected tasks were not found. Please reselect and try again.',
+          });
+        }
       }
 
       if (tasksToAnalyze.length === 0 && prompt?.trim()) {
@@ -906,7 +914,13 @@ app.post('/api/ai/suggest-tasks', async (req, res) => {
         suggestionsByTask.push(analysis);
       }
 
-      const primaryResult = suggestionsByTask[0] || {
+      const primaryTaskId = requestedTaskIds[0];
+      const primaryResult =
+        (primaryTaskId
+          ? suggestionsByTask.find(
+              (result) => String(result.currentTask?.id).trim() === primaryTaskId
+            )
+          : suggestionsByTask[0]) || {
         currentTask: null,
         relatedTasks: [],
         suggestions: [],

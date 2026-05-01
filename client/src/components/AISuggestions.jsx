@@ -103,10 +103,11 @@ export default function AISuggestions({ onAddSuggestion, userId, tasks = [] }) {
   };
 
   const toggleTaskSelection = (taskId) => {
+    const normalizedTaskId = String(taskId);
     setSelectedTaskIds((prev) =>
-      prev.includes(taskId)
-        ? prev.filter((id) => id !== taskId)
-        : [...prev, taskId]
+      prev.includes(normalizedTaskId)
+        ? prev.filter((id) => id !== normalizedTaskId)
+        : [...prev, normalizedTaskId]
     );
   };
 
@@ -116,7 +117,7 @@ export default function AISuggestions({ onAddSuggestion, userId, tasks = [] }) {
       return;
     }
 
-    setSelectedTaskIds(tasks.map((task) => task.id));
+    setSelectedTaskIds(tasks.map((task) => String(task.id)));
   };
 
   return (
@@ -206,7 +207,7 @@ export default function AISuggestions({ onAddSuggestion, userId, tasks = [] }) {
               >
                 <input
                   type="checkbox"
-                  checked={selectedTaskIds.includes(task.id)}
+                  checked={selectedTaskIds.includes(String(task.id))}
                   onChange={() => toggleTaskSelection(task.id)}
                 />
                 <span>{task.title}</span>

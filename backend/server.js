@@ -70,59 +70,6 @@ async function ensureTaskHierarchySchema() {
   `);
 }
 
-async function syncUserRecord({ auth0Id, name, email }) {
-  if (!auth0Id || !email) {
-    throw new Error('auth0Id and email are required');
-  }
-
-  const displayName = name || email;
-
-  await client.query('BEGIN');
-
-  try {
-    const existingUser = await client.query(
-      `SELECT *
-       FROM users
-       WHERE auth0_id = $1 OR email = $2
-       ORDER BY CASE
-         WHEN auth0_id = $1 THEN 0
-         WHEN email = $2 THEN 1
-         ELSE 2
-       END
-       LIMIT 1`,
-      [auth0Id, email]
-    );
-
-    let result;
-
-    if (existingUser.rows.length > 0) {
-      result = await client.query(
-        `UPDATE users
-         SET auth0_id = $1,
-             name = $2,
-             email = $3,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $4
-         RETURNING *`,
-        [auth0Id, displayName, email, existingUser.rows[0].id]
-      );
-    } else {
-      result = await client.query(
-        `INSERT INTO users (auth0_id, name, email)
-         VALUES ($1, $2, $3)
-         RETURNING *`,
-        [auth0Id, displayName, email]
-      );
-    }
-
-    await client.query('COMMIT');
-    return result.rows[0];
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  }
-}
-
 // Sync all Auth0 users to Neon (runs on startup)
 async function syncAllAuth0Users() {
   try {
@@ -161,15 +108,15 @@ async function syncAllAuth0Users() {
     const auth0Users = await usersRes.json();
 
     for (const u of auth0Users) {
-      if (!u.email) {
-        continue;
-      }
-
-      await syncUserRecord({
-        auth0Id: u.user_id,
-        name: u.name || u.nickname || u.email,
-        email: u.email,
-      });
+      await client.query(
+        `INSERT INTO users (auth0_id, name, email)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (auth0_id) DO UPDATE
+           SET name = EXCLUDED.name,
+               email = EXCLUDED.email,
+               updated_at = CURRENT_TIMESTAMP`,
+        [u.user_id, u.name || u.nickname || u.email, u.email]
+      );
     }
 
     console.log(`Synced ${auth0Users.length} Auth0 user(s) to database`);
@@ -253,16 +200,17 @@ app.post('/api/auth/sync-all-users', async (req, res) => {
 
     const results = [];
     for (const u of auth0Users) {
-      if (!u.email) {
-        continue;
-      }
-
-      const syncedUser = await syncUserRecord({
-        auth0Id: u.user_id,
-        name: u.name || u.nickname || u.email,
-        email: u.email,
-      });
-      results.push(syncedUser);
+      const result = await client.query(
+        `INSERT INTO users (auth0_id, name, email)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (auth0_id) DO UPDATE
+           SET name = EXCLUDED.name,
+               email = EXCLUDED.email,
+               updated_at = CURRENT_TIMESTAMP
+         RETURNING *`,
+        [u.user_id, u.name || u.nickname || u.email, u.email]
+      );
+      results.push(result.rows[0]);
     }
 
     res.json({
@@ -284,15 +232,27 @@ app.post('/api/auth/sync-user', async (req, res) => {
       return res.status(400).json({ error: 'auth0_id and email are required' });
     }
 
-    const result = await syncUserRecord({
-      auth0Id: auth0_id,
-      name,
-      email,
-    });
+    const existingUser = await client.query(
+      'SELECT * FROM users WHERE auth0_id = $1',
+      [auth0_id]
+    );
+
+    let result;
+    if (existingUser.rows.length > 0) {
+      result = await client.query(
+        'UPDATE users SET name = $1, email = $2, updated_at = CURRENT_TIMESTAMP WHERE auth0_id = $3 RETURNING *',
+        [name, email, auth0_id]
+      );
+    } else {
+      result = await client.query(
+        'INSERT INTO users (auth0_id, name, email) VALUES ($1, $2, $3) RETURNING *',
+        [auth0_id, name, email]
+      );
+    }
 
     res.status(201).json({
       status: 'User synced',
-      user: result,
+      user: result.rows[0],
     });
   } catch (error) {
     res.status(500).json({
